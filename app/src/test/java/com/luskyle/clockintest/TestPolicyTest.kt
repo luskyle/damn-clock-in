@@ -17,10 +17,24 @@ class TestPolicyTest {
         assertFalse(TestPolicy.inWindow(TestPolicy.end(day) + 1))
     }
 
-    @Test fun enablingInsideOrAfterWindowStartsTomorrow() {
+    @Test fun enablingBeforeWindowEndsCanStartToday() {
         assertEquals(day, TestPolicy.firstDay(TestPolicy.start(day) - 1))
-        assertEquals(day.plusDays(1), TestPolicy.firstDay(TestPolicy.start(day)))
+        assertEquals(day, TestPolicy.firstDay(TestPolicy.start(day)))
+        assertEquals(day, TestPolicy.firstDay(TestPolicy.end(day) - 1))
+        assertEquals(day.plusDays(1), TestPolicy.firstDay(TestPolicy.end(day)))
         assertEquals(day.plusDays(1), TestPolicy.firstDay(TestPolicy.end(day) + 1))
+    }
+
+    @Test fun remainingWindowSamplesOnlyFutureWholeSecondsIncludingLastSecond() {
+        val now = TestPolicy.end(day) - 10_500
+        val earliest = TestPolicy.end(day) - 10_000
+        for (second in 0..10) {
+            assertEquals(earliest + second * 1000, TestPolicy.chooseAvailable(day, now, second))
+        }
+        assertEquals(TestPolicy.end(day), TestPolicy.chooseAvailable(day, TestPolicy.end(day) - 1, 0))
+        assertThrows(IllegalArgumentException::class.java) {
+            TestPolicy.chooseAvailable(day, TestPolicy.end(day), 0)
+        }
     }
 
     @Test fun onlyTwoNavigationTargetsAreAllowed() {

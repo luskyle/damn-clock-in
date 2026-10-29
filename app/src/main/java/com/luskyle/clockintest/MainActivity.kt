@@ -133,7 +133,7 @@ class MainActivity : Activity() {
         content.space(4)
         content.addView(text(getString(R.string.app_tagline), 15f, muted))
         content.space(20)
-        content.addView(text("测试模式  /  只到考勤页面，不提交打卡", 12f, teal).apply {
+        content.addView(text("定位打卡  /  成功后退出 BOE 并息屏", 12f, teal).apply {
             background = round(Color.rgb(226, 242, 237), 10)
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }, LinearLayout.LayoutParams(-1, -2))
@@ -169,6 +169,10 @@ class MainActivity : Activity() {
                 ))
                 space(14)
                 addView(button("设置${slot.title}时间段") { editWindow(slot) }, LinearLayout.LayoutParams(-1, -2))
+                store.lastAttendance(slot)?.let {
+                    space(10)
+                    addView(text("最近真实打卡尝试：$it", 12f, muted))
+                }
             }
         }
         content.space(2)
@@ -179,6 +183,18 @@ class MainActivity : Activity() {
             else if (service == null) feedback("无障碍连接已变化，请重试")
             else service.begin()
         }, LinearLayout.LayoutParams(-1, dp(54)))
+        content.space(10)
+        content.addView(button("立即打卡 · 需再次确认") { confirmAttendance(dryRun = false) },
+            LinearLayout.LayoutParams(-1, -2))
+        if (ScheduleSlot.entries.any { store.canRetryAttendance(it) }) {
+            content.space(10)
+            content.addView(button("继续待核验定位请求 · 有限重试") {
+                confirmAttendance(dryRun = false, retryPending = true)
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        content.space(10)
+        content.addView(button("打卡预检 · 不点击打卡") { confirmAttendance(dryRun = true) },
+            LinearLayout.LayoutParams(-1, -2))
         content.space(10)
         content.addView(button("停止测试并关闭全部计划") {
             scheduler.disable()
@@ -197,7 +213,7 @@ class MainActivity : Activity() {
                 addView(button("执行记录") { showHistory() }, LinearLayout.LayoutParams(0, -2, 1f))
             })
         }
-        content.addView(text("中国大陆工作日 · 节假日休息，调休补班执行\n官方日历：${ChinaWorkdays.years.joinToString()} 年 · 缺失年份暂停\n更改时间段后需重新开启；不会补执行已错过的时间。", 12f, muted).apply {
+        content.addView(text("中国大陆工作日 · 节假日休息，调休补班执行\n官方日历：${ChinaWorkdays.years.joinToString()} 年 · 缺失年份暂停\n当天未尝试且窗口未结束，当天生效；窗口内从剩余时间随机。\n更改时间段后需重新开启；已过期或已尝试不补执行。", 12f, muted).apply {
             gravity = Gravity.CENTER
         })
         val keep = store.prefs.getBoolean("stayAwake", false)
@@ -220,11 +236,32 @@ class MainActivity : Activity() {
             render()
             return
         }
-        AlertDialog.Builder(this).setTitle("开启${slot.title}页面测试？")
-            .setMessage("中国大陆工作日北京时间 ${Store(this).window(slot)} 随机一次，只导航，不打卡。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；密码/人脸锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录。系统强行停止或关机无法保证执行。")
-            .setPositiveButton("开启测试") { _, _ -> scheduler.enable(slot); render() }
+        val store = Store(this)
+        val action = "定位打卡，总计最多点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏"
+        AlertDialog.Builder(this).setTitle("开启${slot.title}计划？")
+            .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
+            .setPositiveButton("确认开启") { _, _ -> scheduler.enable(slot); render() }
             .setNegativeButton("取消") { _, _ -> render() }
             .setOnCancelListener { render() }.show()
+    }
+
+    private fun confirmAttendance(dryRun: Boolean, retryPending: Boolean = false) {
+        val mode = AttendanceMode.LOCATION
+        AlertDialog.Builder(this).setTitle(if (dryRun) "选择预检时段（不提交）" else "选择本次真实打卡时段")
+            .setItems(ScheduleSlot.entries.map { it.title }.toTypedArray()) { _, index ->
+                val slot = ScheduleSlot.entries[index]
+                AlertDialog.Builder(this).setTitle("${slot.title}${mode.label}")
+                    .setMessage(if (dryRun) "仅打开页面并检查唯一可点击按钮，不点击打卡，不占用当天打卡次数。"
+                        else "将${if (retryPending) "继续待核验请求" else "发起真实定位打卡"}，今天本时段总计最多三次点击，每次先等十秒核验，允许返回重新进入一次。旧请求次数也计入预算。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏，不点击额外弹窗、不绕过验证；已成功或预算耗尽不会继续。")
+                    .setPositiveButton(if (dryRun) "开始预检" else "确认真实打卡") { _, _ ->
+                        val issue = NavigationAccess.read(this).issue
+                        val service = NavigationService.instance
+                        if (issue != null) feedback(issue)
+                        else if (service == null) feedback("无障碍连接已变化，请重试")
+                        else service.begin(slot = slot, previewMode = if (dryRun) mode else null,
+                            retryPending = retryPending)
+                    }.setNegativeButton("取消", null).show()
+            }.setNegativeButton("取消", null).show()
     }
 
     private fun editWindow(slot: ScheduleSlot) {
@@ -303,7 +340,7 @@ class MainActivity : Activity() {
             layout.addView(button(label, action = action), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
         entry("无障碍服务 · ${NavigationAccess.read(this).label}") {
-            AlertDialog.Builder(this).setTitle("${getString(R.string.app_name)} · 仅导航测试")
+            AlertDialog.Builder(this).setTitle("${getString(R.string.app_name)} · 考勤辅助")
                 .setMessage(getString(R.string.service_description))
                 .setPositiveButton("前往设置") { _, _ -> settings(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                 .setNegativeButton("取消", null).show()

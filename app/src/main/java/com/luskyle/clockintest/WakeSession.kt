@@ -15,13 +15,16 @@ object WakeSession {
     private var until = 0L
     private var elapsedUntil = 0L
     private var consumed = false
+    var attendanceSlot: ScheduleSlot? = null
+        private set
 
-    fun request(context: Context, deadline: Long) {
+    fun request(context: Context, deadline: Long, slot: ScheduleSlot? = null) {
         if (active()) {
             Store(context).log("已有唤醒或导航请求，忽略重复触发")
             return
         }
         finish()
+        attendanceSlot = slot
         val duration = minOf(65_000L, deadline - System.currentTimeMillis())
         if (duration <= 0) {
             Notice.result(context, "唤醒请求已过期，未启动")
@@ -82,5 +85,6 @@ object WakeSession {
         lock = null
         until = 0
         elapsedUntil = 0
+        attendanceSlot = null
     }
 }

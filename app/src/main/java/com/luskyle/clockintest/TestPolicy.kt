@@ -28,7 +28,20 @@ object TestPolicy {
     }
 
     fun firstDay(now: Long, window: TimeWindow = TimeWindow.morning): LocalDate =
-        if (now < start(day(now), window)) day(now) else day(now).plusDays(1)
+        if (now < end(day(now), window)) day(now) else day(now).plusDays(1)
+
+    fun chooseAvailable(
+        day: LocalDate, now: Long, second: Int? = null,
+        window: TimeWindow = TimeWindow.morning
+    ): Long {
+        val earliest = maxOf(start(day, window), (now / 1000 + 1) * 1000)
+        val last = end(day, window)
+        require(earliest <= last) { "No remaining time in window" }
+        val seconds = ((last - earliest) / 1000).toInt()
+        val offset = second ?: Random.nextInt(seconds + 1)
+        require(offset in 0..seconds)
+        return earliest + offset * 1000L
+    }
 
     fun canAttempt(now: Long, planned: Long, attempted: String, window: TimeWindow = TimeWindow.morning): Boolean =
         planned > 0 && now >= planned && inWindow(planned, window) && inWindow(now, window) &&
@@ -43,7 +56,7 @@ object TestPolicy {
             if (day(planned) == day(now) && inWindow(now, window)) return minOf(now + 1000, end(day(now), window))
         }
         val first = firstDay(now, window)
-        return choose(if (attempted == first.toString()) first.plusDays(1) else first, second, window)
+        return chooseAvailable(if (attempted == first.toString()) first.plusDays(1) else first, now, second, window)
     }
 
     fun allowedNavigation(id: String, text: String): Boolean =

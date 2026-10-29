@@ -50,7 +50,7 @@ class Scheduler(private val context: Context) {
         alarms.cancel(wakeTestPending())
         check(store.prefs.edit().remove("wakeTestAt").commit()) { "Cannot cancel wake test" }
         WakeSession.finish()
-        NavigationService.instance?.stop("已停止测试和每日计划")
+        NavigationService.instance?.stop("已停止导航和每日计划")
         Notice.result(context, "上下班计划已关闭；不会再自动导航")
     }
 
@@ -131,7 +131,7 @@ class Scheduler(private val context: Context) {
         val now = System.currentTimeMillis()
         val window = store.window(slot)
         schedule(slot) {
-            ChinaWorkdays.plan(now, store.next(slot), store.attempted(slot), Random.nextInt(window.seconds + 1), window)
+            ChinaWorkdays.plan(now, store.next(slot), store.attempted(slot), null, window)
         }
     }
 
@@ -149,7 +149,7 @@ class Scheduler(private val context: Context) {
         try {
             alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, pending(slot))
             store.setNext(slot, time)
-            store.log("${slot.title}下次页面测试：${Store.format(time)}（北京时间）")
+            store.log("${slot.title}下次计划：${Store.format(time)}（北京时间）")
         } catch (error: SecurityException) {
             disableSlot(slot)
             store.setNext(slot, 0)
@@ -188,8 +188,8 @@ class Scheduler(private val context: Context) {
             Notice.result(context, "${slot.title}定时测试未运行：$issue；请打开助手手动测试")
             return
         }
-        store.log("${slot.title}定时导航测试开始（不提交）")
-        WakeSession.request(context, TestPolicy.end(TestPolicy.day(now), window))
+        store.log("${slot.title}定时定位打卡计划开始")
+        WakeSession.request(context, TestPolicy.end(TestPolicy.day(now), window), slot)
     }
 }
 

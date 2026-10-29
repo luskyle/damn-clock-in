@@ -40,7 +40,7 @@ object ChinaWorkdays {
         return date
     }
 
-    fun plan(now: Long, previous: Long, attempted: String, second: Int, window: TimeWindow): Long {
+    fun plan(now: Long, previous: Long, attempted: String, second: Int?, window: TimeWindow): Long {
         if (previous > 0 && TestPolicy.inWindow(previous, window) &&
             attempted != TestPolicy.day(previous).toString() && isWorkday(TestPolicy.day(previous))) {
             if (previous > now) return previous
@@ -50,6 +50,6 @@ object ChinaWorkdays {
         }
         var first = TestPolicy.firstDay(now, window)
         if (attempted == first.toString()) first = first.plusDays(1)
-        return TestPolicy.choose(nextWorkday(first), second, window)
+        return TestPolicy.chooseAvailable(nextWorkday(first), now, second, window)
     }
 }

@@ -44,6 +44,7 @@ class ScheduleStorageTest {
 
     @Test fun legacyPlanMigratesOnlyToMorningOnce() {
         context.getSharedPreferences("navigation-test", 0).edit()
+            .putBoolean("locationOnlyV1", true)
             .putBoolean("enabled", true).putLong("next", 123456)
             .putString("attempted", "2026-10-29").commit()
         val store = Store(context)
@@ -54,6 +55,61 @@ class ScheduleStorageTest {
         store.setEnabled(ScheduleSlot.MORNING, false)
         assertFalse(Store(context).enabled(ScheduleSlot.MORNING))
         assertFalse(store.prefs.contains("enabled"))
+    }
+
+    @Test fun attendanceClaimAndBudgetSurviveReopening() {
+        val store = Store(context)
+        assertFalse(store.prefs.contains("attendanceMode"))
+        assertTrue(store.claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
+        assertFalse(Store(context).claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
+        assertFalse(Store(context).claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
+        assertFalse(store.attendanceClaimed(ScheduleSlot.MORNING))
+        repeat(AttendanceAttempt.MAX_CLICKS) {
+            assertTrue(Store(context).reserveAttendanceClick(ScheduleSlot.EVENING))
+        }
+        assertFalse(Store(context).reserveAttendanceClick(ScheduleSlot.EVENING))
+        assertFalse(Store(context).canRetryAttendance(ScheduleSlot.EVENING))
+        assertTrue(Store(context).attendanceClaimed(ScheduleSlot.EVENING))
+        assertFalse(store.enabled(ScheduleSlot.MORNING))
+        assertFalse(store.enabled(ScheduleSlot.EVENING))
+    }
+
+    @Test fun fixedLocationMigrationClosesOldNavigationPlansWithoutResettingGuards() {
+        context.getSharedPreferences("navigation-test", 0).edit()
+            .putBoolean("dualSchedule", true).putBoolean("workdayV3", true)
+            .putString("attendanceMode", "NAVIGATION")
+            .putBoolean("EVENING.enabled", true).putLong("EVENING.next", 123456)
+            .putString("EVENING.attempted", "2026-10-29")
+            .putInt("EVENING.attendanceClicks", 2).commit()
+        val store = Store(context)
+        assertFalse(store.enabled(ScheduleSlot.EVENING))
+        assertEquals(0L, store.next(ScheduleSlot.EVENING))
+        assertEquals("2026-10-29", store.attempted(ScheduleSlot.EVENING))
+        assertEquals(2, store.prefs.getInt("EVENING.attendanceClicks", 0))
+        assertFalse(store.prefs.contains("attendanceMode"))
+        store.setEnabled(ScheduleSlot.EVENING, true)
+        assertTrue(Store(context).enabled(ScheduleSlot.EVENING))
+    }
+
+    @Test fun fixedLocationMigrationPreservesPreviouslyConfirmedLocationPlan() {
+        context.getSharedPreferences("navigation-test", 0).edit()
+            .putBoolean("dualSchedule", true).putBoolean("workdayV3", true)
+            .putString("attendanceMode", "LOCATION")
+            .putBoolean("EVENING.enabled", true).putLong("EVENING.next", 123456).commit()
+        val store = Store(context)
+        assertTrue(store.enabled(ScheduleSlot.EVENING))
+        assertEquals(123456L, store.next(ScheduleSlot.EVENING))
+        assertFalse(store.prefs.contains("attendanceMode"))
+    }
+
+    @Test fun successfulAttendanceCannotBeResumedEvenWithUnusedBudget() {
+        val store = Store(context)
+        assertTrue(store.claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
+        assertTrue(store.reserveAttendanceClick(ScheduleSlot.EVENING))
+        assertTrue(Store(context).canRetryAttendance(ScheduleSlot.EVENING))
+        store.attendanceResult(ScheduleSlot.EVENING, "已核验 BOE 本次新增定位打卡记录", success = true)
+        assertFalse(Store(context).canRetryAttendance(ScheduleSlot.EVENING))
+        assertEquals(1, Store(context).attendanceClicks(ScheduleSlot.EVENING))
     }
 
     @Test fun windowsAndAttemptsPersistIndependently() {
@@ -93,6 +149,7 @@ class ScheduleStorageTest {
 
     @Test fun oldEveningDefaultMigratesAndDisablesOnlyEvening() {
         context.getSharedPreferences("navigation-test", 0).edit()
+            .putBoolean("locationOnlyV1", true)
             .putBoolean("dualSchedule", true)
             .putInt("EVENING.start", 1050).putInt("EVENING.end", 1080)
             .putBoolean("EVENING.enabled", true).putLong("EVENING.next", 123456)

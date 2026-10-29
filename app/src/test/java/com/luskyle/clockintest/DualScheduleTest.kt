@@ -53,11 +53,11 @@ class DualScheduleTest {
         assertNotEquals(ScheduleSlot.MORNING.alarmId, ScheduleSlot.EVENING.alarmId)
     }
 
-    @Test fun eachWindowStartsTodayOnlyBeforeItsOwnStart() {
+    @Test fun eachWindowStartsTodayUntilItsOwnEnd() {
         val noon = day.atTime(12, 0).atZone(TestPolicy.zone).toInstant().toEpochMilli()
         assertEquals(day.plusDays(1), TestPolicy.firstDay(noon, morning))
         assertEquals(day, TestPolicy.firstDay(noon, evening))
-        assertEquals(day.plusDays(1), TestPolicy.firstDay(TestPolicy.start(day, evening), evening))
+        assertEquals(day, TestPolicy.firstDay(TestPolicy.start(day, evening), evening))
     }
 
     @Test fun eveningRestorePreservesPlanAndSkipsExpiredWindow() {

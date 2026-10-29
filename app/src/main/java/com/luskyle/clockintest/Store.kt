@@ -32,6 +32,17 @@ class Store(context: Context) {
             }
             check(editor.commit()) { "Cannot migrate evening default" }
         }
+        if (!prefs.getBoolean("locationOnlyV1", false)) {
+            val wasLocation = prefs.getString("attendanceMode", null) == "LOCATION"
+            val editor = prefs.edit().remove("attendanceMode").putBoolean("locationOnlyV1", true)
+            if (!wasLocation) {
+                ScheduleSlot.entries.forEach {
+                    editor.putBoolean("${it.name}.enabled", false).putLong("${it.name}.next", 0)
+                }
+            }
+            check(editor.commit()) { "Cannot migrate fixed location attendance" }
+            if (!wasLocation) log("计划已统一为定位打卡；旧非定位计划保持关闭，请重新确认开启")
+        }
     }
 
     fun enabled(slot: ScheduleSlot): Boolean = prefs.getBoolean("${slot.name}.enabled", false)
@@ -43,6 +54,68 @@ class Store(context: Context) {
         check(prefs.edit().putLong("${slot.name}.next", value).commit()) { "Cannot persist next test" }
     }
     fun attempted(slot: ScheduleSlot): String = prefs.getString("${slot.name}.attempted", "") ?: ""
+    fun attendanceClaimed(slot: ScheduleSlot): Boolean =
+        prefs.getString("${slot.name}.attendanceDay", "") == TestPolicy.day(System.currentTimeMillis()).toString()
+
+    fun claimAttendance(slot: ScheduleSlot, mode: AttendanceMode): Boolean {
+        check(mode != AttendanceMode.NAVIGATION)
+        if (attendanceClaimed(slot)) return false
+        check(prefs.edit()
+            .putString("${slot.name}.attendanceDay", TestPolicy.day(System.currentTimeMillis()).toString())
+            .putString("${slot.name}.attendanceResult", "${mode.label}请求准备发出，结果待核验")
+            .putInt("${slot.name}.attendanceClicks", 0)
+            .putLong("${slot.name}.attendanceStartedAt", System.currentTimeMillis())
+            .putBoolean("${slot.name}.attendanceSucceeded", false)
+            .commit()) { "Cannot persist attendance claim" }
+        return true
+    }
+
+    fun attendanceClicks(slot: ScheduleSlot): Int =
+        if (attendanceClaimed(slot)) prefs.getInt("${slot.name}.attendanceClicks", 1) else 0
+
+    fun attendanceStartedAt(slot: ScheduleSlot): Long =
+        prefs.getLong("${slot.name}.attendanceStartedAt", 0)
+
+    fun ensureAttendanceStartedAt(slot: ScheduleSlot): Long {
+        val saved = attendanceStartedAt(slot)
+        if (saved > 0) return saved
+        val now = System.currentTimeMillis()
+        check(prefs.edit().putLong("${slot.name}.attendanceStartedAt", now).commit()) {
+            "Cannot persist retry verification start"
+        }
+        log("旧请求缺少时间依据，本次明确确认的重试将仅核验此刻之后的新增记录，保留原点击预算")
+        return now
+    }
+
+    fun canRetryAttendance(slot: ScheduleSlot): Boolean =
+        attendanceClaimed(slot) && attendanceClicks(slot) in 1 until AttendanceAttempt.MAX_CLICKS &&
+            !prefs.getBoolean("${slot.name}.attendanceSucceeded", false) &&
+            prefs.getString("${slot.name}.attendanceResult", "").orEmpty().let {
+                !it.contains("打卡成功") && !it.contains("已核验")
+            }
+
+    fun reserveAttendanceClick(slot: ScheduleSlot): Boolean {
+        if (!attendanceClaimed(slot) || attendanceClicks(slot) >= AttendanceAttempt.MAX_CLICKS) return false
+        check(prefs.edit().putInt("${slot.name}.attendanceClicks", attendanceClicks(slot) + 1)
+            .putString("${slot.name}.attendanceResult", "定位打卡请求处理中，结果待核验")
+            .commit()) { "Cannot persist attendance click budget" }
+        return true
+    }
+
+    fun attendanceResult(slot: ScheduleSlot, result: String, success: Boolean = false) {
+        check(prefs.edit().putString("${slot.name}.attendanceResult", result)
+            .putBoolean("${slot.name}.attendanceSucceeded", success).commit()) {
+            "Cannot persist attendance result"
+        }
+    }
+
+    fun lastAttendance(slot: ScheduleSlot): String? {
+        val day = prefs.getString("${slot.name}.attendanceDay", null) ?: return null
+        val result = prefs.getString("${slot.name}.attendanceResult", null)
+            ?: "请求结果缺失，请在 BOE 核验，勿直接重试"
+        return "$day  $result"
+    }
+
     fun setAttempted(slot: ScheduleSlot, value: String) {
         check(prefs.edit().putString("${slot.name}.attempted", value).commit()) { "Cannot persist daily attempt" }
     }
@@ -86,7 +159,7 @@ object Notice {
         )
         val builder = Notification.Builder(context, "test")
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("${context.getString(R.string.app_name)} · 不提交打卡")
+            .setContentTitle(context.getString(R.string.app_name))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)

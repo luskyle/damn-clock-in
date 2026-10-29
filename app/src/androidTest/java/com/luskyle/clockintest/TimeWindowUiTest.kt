@@ -102,7 +102,7 @@ class TimeWindowUiTest {
         val context = instrumentation.targetContext
         val manager = context.packageManager
         assertEquals("永不迟到", context.applicationInfo.loadLabel(manager).toString())
-        assertEquals("永不迟到 · 页面导航（不提交）", manager.getServiceInfo(
+        assertEquals("永不迟到 · 考勤辅助（需确认开启）", manager.getServiceInfo(
             ComponentName(context, NavigationService::class.java), 0
         ).loadLabel(manager).toString())
         val icon = manager.getApplicationIcon(context.packageName)

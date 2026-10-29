@@ -46,7 +46,8 @@ class WakeActivity : Activity() {
             return
         }
         setContentView(TextView(this).apply {
-            text = "正在唤醒页面测试\n只到考勤页面，不提交打卡"
+            text = if (WakeSession.attendanceSlot == null) "正在唤醒页面测试\n只到考勤页面，不提交打卡"
+                else "正在唤醒考勤计划\n按已确认的方式运行"
             textSize = 20f
             gravity = Gravity.CENTER
         })
@@ -92,7 +93,8 @@ class WakeActivity : Activity() {
             return
         }
         Store(this).log("屏幕唤醒成功；开始导航，无需助手首页在前台")
-        service.begin(until)
+        val slot = WakeSession.attendanceSlot
+        service.begin(until, slot = slot)
         finish()
     }
 

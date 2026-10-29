@@ -78,4 +78,29 @@ class ChinaWorkdaysTest {
         ))
         assertEquals("17:30 – 17:32", evening.toString())
     }
+
+    @Test fun newPlanInsideWorkdayWindowIsEffectiveToday() {
+        val today = date("2026-10-29")
+        val now = TestPolicy.end(today, evening) - 10_500
+        for (offset in 0..10) {
+            val planned = ChinaWorkdays.plan(now, 0, "", offset, evening)
+            assertEquals(today, TestPolicy.day(planned))
+            assertTrue(planned > now)
+            assertTrue(TestPolicy.inWindow(planned, evening))
+        }
+        repeat(200) {
+            val planned = ChinaWorkdays.plan(now, 0, "", null, evening)
+            assertTrue(planned > now && planned <= TestPolicy.end(today, evening))
+        }
+    }
+
+    @Test fun attemptedTodayOrEndedWindowGoesToNextWorkday() {
+        val friday = date("2026-10-30")
+        val next = date("2026-11-02")
+        val now = TestPolicy.end(friday, evening) - 10_000
+        assertEquals(TestPolicy.choose(next, 10, evening),
+            ChinaWorkdays.plan(now, 0, friday.toString(), 10, evening))
+        assertEquals(TestPolicy.choose(next, 10, evening),
+            ChinaWorkdays.plan(TestPolicy.end(friday, evening), 0, "", 10, evening))
+    }
 }
