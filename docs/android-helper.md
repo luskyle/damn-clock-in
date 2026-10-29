@@ -5,7 +5,7 @@
 包名与签名不变，覆盖安装保留原配置和授权，不会因此开启计划。
 v0.4.2 加入三叉戟刺穿并撑裂门户图标的抽象视觉、CI/CD 与
 [Release 交付说明](RELEASE.md)，不会改动 BOE 应用本身。
-v0.4.3 放大门户图块与 BOE 字样、加粗白色字母并调整头部位置，改善小尺寸图标辨识度。
+v0.4.3 突出碎裂的门户图块，缩小恶魔并移至右下角，BOE 字母保持自然比例，改善小尺寸辨识度。
 
 图标设计原图保存在 [launcher-concept.png](../artwork/launcher-concept.png)，
 Android 矢量实现位于 [ic_helper.xml](../app/src/main/res/drawable/ic_helper.xml)，

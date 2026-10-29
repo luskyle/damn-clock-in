@@ -109,19 +109,33 @@ class TimeWindowUiTest {
         assertTrue(icon is AdaptiveIconDrawable)
         icon as AdaptiveIconDrawable
         if (Build.VERSION.SDK_INT >= 33) assertNotNull(icon.monochrome)
-        val bitmap = Bitmap.createBitmap(108, 108, Bitmap.Config.ARGB_8888)
+        val renderScale = 4
+        val size = 108 * renderScale
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         try {
-            icon.foreground.setBounds(0, 0, 108, 108)
+            icon.foreground.setBounds(0, 0, size, size)
             icon.foreground.draw(Canvas(bitmap))
             var red = 0
             var gold = 0
             var blue = 0
-            val letters = Rect(108, 108, 0, 0)
-            for (y in 0 until 108) for (x in 0 until 108) {
+            var redX = 0
+            var redY = 0
+            var blueX = 0
+            var blueY = 0
+            val letters = Rect(size, size, 0, 0)
+            for (y in 0 until size) for (x in 0 until size) {
                 val pixel = bitmap.getPixel(x, y)
-                if (pixel == Color.rgb(255, 75, 54)) red++
+                if (pixel == Color.rgb(255, 75, 54)) {
+                    red++
+                    redX += x
+                    redY += y
+                }
                 if (pixel == Color.rgb(232, 190, 97)) gold++
-                if (pixel == Color.rgb(22, 132, 221)) blue++
+                if (pixel == Color.rgb(22, 132, 221)) {
+                    blue++
+                    blueX += x
+                    blueY += y
+                }
                 if (pixel == Color.WHITE) {
                     letters.left = minOf(letters.left, x)
                     letters.top = minOf(letters.top, y)
@@ -129,16 +143,22 @@ class TimeWindowUiTest {
                     letters.bottom = maxOf(letters.bottom, y + 1)
                 }
                 if (Color.alpha(pixel) >= 128) {
-                    val dx = x + 0.5 - 54
-                    val dy = y + 0.5 - 54
-                    assertTrue("Icon artwork exceeds the adaptive safe circle", dx * dx + dy * dy <= 33.5 * 33.5)
+                    val dx = x + 0.5 - size / 2
+                    val dy = y + 0.5 - size / 2
+                    val radius = 33.5 * renderScale
+                    assertTrue("Icon artwork exceeds the adaptive safe circle", dx * dx + dy * dy <= radius * radius)
                 }
             }
-            assertTrue("Devil silhouette is missing", red > 300)
-            assertTrue("Trident is missing", gold > 50)
-            assertTrue("Shattered portal icon is missing", blue > 30)
-            assertTrue("BOE lettering is too narrow: ${letters.width()}", letters.width() >= 21)
-            assertTrue("BOE lettering is too short: ${letters.height()}", letters.height() >= 11)
+            android.util.Log.i("IconBrandTest", "red=$red gold=$gold blue=$blue letters=$letters")
+            assertTrue("Devil silhouette is missing: $red pixels", red > 60 * renderScale * renderScale)
+            assertTrue("Trident is missing: $gold pixels", gold > 50 * renderScale * renderScale)
+            assertTrue("Shattered portal icon is missing: $blue pixels", blue > 30 * renderScale * renderScale)
+            assertTrue("The shattered portal should dominate the devil", blue >= red * 2)
+            assertTrue("The devil should sit to the right", redX.toDouble() / red > blueX.toDouble() / blue + 8 * renderScale)
+            assertTrue("The devil should sit below the portal", redY.toDouble() / red > blueY.toDouble() / blue + 12 * renderScale)
+            assertTrue("BOE lettering is too narrow: ${letters.width()}", letters.width() >= 24 * renderScale)
+            assertTrue("BOE lettering is too short: ${letters.height()}", letters.height() >= 8 * renderScale)
+            assertTrue("BOE lettering is stretched", letters.width().toDouble() / letters.height() in 2.0..3.2)
         } finally {
             bitmap.recycle()
         }
