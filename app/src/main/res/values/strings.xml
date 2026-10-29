@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">考勤页面测试助手</string>
+    <string name="service_name">考勤测试导航（不提交）</string>
+    <string name="service_description">仅在你发起测试或启用每日测试时，打开 BOE 移动门户的工作台和考勤入口。绝不点击蓝牙打卡、定位打卡或提交按钮。不收集密码、不上传界面。遇到锁屏、权限或页面不明时停止。开启前请理解此服务可以读取目标应用的界面并点击导航控件。</string>
+</resources>
