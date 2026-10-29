@@ -186,12 +186,6 @@ class MainActivity : Activity() {
         content.space(10)
         content.addView(button("立即打卡 · 需再次确认") { confirmAttendance(dryRun = false) },
             LinearLayout.LayoutParams(-1, -2))
-        if (ScheduleSlot.entries.any { store.canRetryAttendance(it) }) {
-            content.space(10)
-            content.addView(button("继续待核验定位请求 · 有限重试") {
-                confirmAttendance(dryRun = false, retryPending = true)
-            }, LinearLayout.LayoutParams(-1, -2))
-        }
         content.space(10)
         content.addView(button("打卡预检 · 不点击打卡") { confirmAttendance(dryRun = true) },
             LinearLayout.LayoutParams(-1, -2))
@@ -237,7 +231,7 @@ class MainActivity : Activity() {
             return
         }
         val store = Store(this)
-        val action = "定位打卡，总计最多点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏"
+        val action = "定位打卡，每轮最多自动点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏"
         AlertDialog.Builder(this).setTitle("开启${slot.title}计划？")
             .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
             .setPositiveButton("确认开启") { _, _ -> scheduler.enable(slot); render() }
@@ -245,21 +239,20 @@ class MainActivity : Activity() {
             .setOnCancelListener { render() }.show()
     }
 
-    private fun confirmAttendance(dryRun: Boolean, retryPending: Boolean = false) {
+    private fun confirmAttendance(dryRun: Boolean) {
         val mode = AttendanceMode.LOCATION
         AlertDialog.Builder(this).setTitle(if (dryRun) "选择预检时段（不提交）" else "选择本次真实打卡时段")
             .setItems(ScheduleSlot.entries.map { it.title }.toTypedArray()) { _, index ->
                 val slot = ScheduleSlot.entries[index]
                 AlertDialog.Builder(this).setTitle("${slot.title}${mode.label}")
-                    .setMessage(if (dryRun) "仅打开页面并检查唯一可点击按钮，不点击打卡，不占用当天打卡次数。"
-                        else "将${if (retryPending) "继续待核验请求" else "发起真实定位打卡"}，今天本时段总计最多三次点击，每次先等十秒核验，允许返回重新进入一次。旧请求次数也计入预算。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏，不点击额外弹窗、不绕过验证；已成功或预算耗尽不会继续。")
+                    .setMessage(if (dryRun) "仅打开页面并检查唯一可点击按钮，不点击打卡。"
+                        else "将发起新一轮真实定位打卡，不限制当天手动发起次数；今天已成功或之前用完重试次数也可以再次打卡。\n\n每轮最多自动点击三次，每次先等十秒核验，可返回重进一次；本轮结束后可以再次手动发起，不改动定时计划。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏；不点击额外弹窗、不绕过验证。")
                     .setPositiveButton(if (dryRun) "开始预检" else "确认真实打卡") { _, _ ->
                         val issue = NavigationAccess.read(this).issue
                         val service = NavigationService.instance
                         if (issue != null) feedback(issue)
                         else if (service == null) feedback("无障碍连接已变化，请重试")
-                        else service.begin(slot = slot, previewMode = if (dryRun) mode else null,
-                            retryPending = retryPending)
+                        else service.begin(slot = slot, previewMode = if (dryRun) mode else null)
                     }.setNegativeButton("取消", null).show()
             }.setNegativeButton("取消", null).show()
     }

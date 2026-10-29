@@ -57,11 +57,10 @@ class NavigationService : AccessibilityService() {
     fun begin(
         until: Long = System.currentTimeMillis() + 60_000,
         slot: ScheduleSlot? = null,
-        previewMode: AttendanceMode? = null,
-        retryPending: Boolean = false
+        previewMode: AttendanceMode? = null
     ) {
         if (running || finishingSuccess) {
-            Store(this).log("已有测试在进行，忽略重复启动")
+            Notice.result(this, "当前请求仍在执行或收尾，请等待本轮结束后再次打卡")
             return
         }
         if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
@@ -77,21 +76,11 @@ class NavigationService : AccessibilityService() {
         }
         val dryRun = previewMode != null
         val mode = previewMode ?: if (slot == null) AttendanceMode.NAVIGATION else AttendanceMode.LOCATION
-        if (!dryRun && mode != AttendanceMode.NAVIGATION && slot != null &&
-            Store(this).attendanceClaimed(slot) &&
-            (!retryPending || !Store(this).canRetryAttendance(slot))) {
-            WakeSession.finish()
-            Notice.result(this, "${slot.title}今天已发起过打卡请求，不再自动重试；请在 BOE 核验记录")
-            return
-        }
         running = true
-        val previousClicks = if (!dryRun && slot != null && Store(this).attendanceClaimed(slot))
-            Store(this).attendanceClicks(slot) else 0
-        attempt = AttendanceAttempt(mode, dryRun, previousClicks)
+        attempt = AttendanceAttempt(mode, dryRun)
         attendanceSlot = slot
         submittedAt = 0
-        submittedWallTime = if (previousClicks > 0 && slot != null)
-            Store(this).ensureAttendanceStartedAt(slot) else 0
+        submittedWallTime = 0
         reentered = false
         waitingForReentry = false
         clickedEntry = false
@@ -166,7 +155,7 @@ class NavigationService : AccessibilityService() {
                 attempt.waitingForResult &&
                     SystemClock.elapsedRealtime() - submittedAt >= AttendanceAttempt.RESULT_WAIT_MS -> {
                     if (!attempt.prepareRetry()) {
-                        stop("已用完三次定位点击预算，结果仍待核验；请手动检查 BOE 记录")
+                        stop("本轮三次定位点击已用完，结果仍待核验；请核验 BOE 记录，可再次手动发起新请求")
                     } else if (attempt.clicks >= 2 && !reentered) {
                         reentered = true
                         waitingForReentry = true
@@ -176,7 +165,7 @@ class NavigationService : AccessibilityService() {
                         activity = ""
                         if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                             stop("返回考勤入口失败，已停止重试")
-                        } else Store(this).log("暂无本次记录，返回后重新进入考勤页；仍受三次总预算限制")
+                        } else Store(this).log("暂无本次记录，返回后重新进入考勤页；本轮最多自动点击三次")
                     } else {
                         Store(this).log("暂无本次记录，准备有界重试；已点击 ${attempt.clicks}/3")
                     }
@@ -253,10 +242,7 @@ class NavigationService : AccessibilityService() {
             return
         }
         val store = Store(this)
-        if (!attempt.clicked && !store.claimAttendance(slot, attempt.mode)) {
-            stop("今天该时段已发起过请求，请核验 BOE 记录")
-            return
-        }
+        if (!attempt.clicked) store.startAttendance(slot, attempt.mode)
         if (!store.reserveAttendanceClick(slot)) {
             stop("定位打卡点击预算已耗尽，已停止")
             return

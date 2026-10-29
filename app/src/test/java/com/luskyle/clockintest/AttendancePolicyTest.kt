@@ -55,6 +55,20 @@ class AttendancePolicyTest {
         assertThrows(IllegalStateException::class.java) { run.markClick(page) }
     }
 
+    @Test fun newSessionsDoNotInheritPriorSuccessOrExhaustedRetryBudget() {
+        repeat(5) {
+            val run = AttendanceAttempt(AttendanceMode.LOCATION, false)
+            assertEquals(0, run.clicks)
+            repeat(AttendanceAttempt.MAX_CLICKS) {
+                assertTrue(run.ready(pkg, page, 1))
+                run.markClick(page)
+                run.prepareRetry()
+            }
+            assertFalse(run.ready(pkg, page, 1))
+            assertTrue(run.hasNewSuccess(page + "打卡成功"))
+        }
+    }
+
     @Test fun resumedAttemptPreservesBudgetAndOriginalSuccessBaselineAcrossRetry() {
         val resumed = AttendanceAttempt(AttendanceMode.LOCATION, false, 2)
         resumed.markClick(page)

@@ -60,15 +60,13 @@ class ScheduleStorageTest {
     @Test fun attendanceClaimAndBudgetSurviveReopening() {
         val store = Store(context)
         assertFalse(store.prefs.contains("attendanceMode"))
-        assertTrue(store.claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
-        assertFalse(Store(context).claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
-        assertFalse(Store(context).claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
+        store.startAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION)
+        assertEquals(0, Store(context).attendanceClicks(ScheduleSlot.EVENING))
         assertFalse(store.attendanceClaimed(ScheduleSlot.MORNING))
         repeat(AttendanceAttempt.MAX_CLICKS) {
             assertTrue(Store(context).reserveAttendanceClick(ScheduleSlot.EVENING))
         }
         assertFalse(Store(context).reserveAttendanceClick(ScheduleSlot.EVENING))
-        assertFalse(Store(context).canRetryAttendance(ScheduleSlot.EVENING))
         assertTrue(Store(context).attendanceClaimed(ScheduleSlot.EVENING))
         assertFalse(store.enabled(ScheduleSlot.MORNING))
         assertFalse(store.enabled(ScheduleSlot.EVENING))
@@ -102,14 +100,35 @@ class ScheduleStorageTest {
         assertFalse(store.prefs.contains("attendanceMode"))
     }
 
-    @Test fun successfulAttendanceCannotBeResumedEvenWithUnusedBudget() {
+    @Test fun successfulAttendanceAllowsNewRequestWithoutChangingDailyPlans() {
         val store = Store(context)
-        assertTrue(store.claimAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION))
+        store.startAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION)
         assertTrue(store.reserveAttendanceClick(ScheduleSlot.EVENING))
-        assertTrue(Store(context).canRetryAttendance(ScheduleSlot.EVENING))
         store.attendanceResult(ScheduleSlot.EVENING, "已核验 BOE 本次新增定位打卡记录", success = true)
-        assertFalse(Store(context).canRetryAttendance(ScheduleSlot.EVENING))
+        assertFalse(store.reserveAttendanceClick(ScheduleSlot.EVENING))
         assertEquals(1, Store(context).attendanceClicks(ScheduleSlot.EVENING))
+        store.setAttempted(ScheduleSlot.EVENING, "2026-10-29")
+        store.setNext(ScheduleSlot.EVENING, 123456)
+        Store(context).startAttendance(ScheduleSlot.EVENING, AttendanceMode.LOCATION)
+        assertEquals(0, store.attendanceClicks(ScheduleSlot.EVENING))
+        assertFalse(store.prefs.getBoolean("EVENING.attendanceSucceeded", true))
+        assertTrue(store.reserveAttendanceClick(ScheduleSlot.EVENING))
+        assertEquals("2026-10-29", store.attempted(ScheduleSlot.EVENING))
+        assertEquals(123456L, store.next(ScheduleSlot.EVENING))
+    }
+
+    @Test fun newRequestsRemainAvailableAfterExhaustionOrPendingResults() {
+        val store = Store(context)
+        val slot = ScheduleSlot.EVENING
+        repeat(5) {
+            Store(context).startAttendance(slot, AttendanceMode.LOCATION)
+            assertEquals(0, store.attendanceClicks(slot))
+            repeat(AttendanceAttempt.MAX_CLICKS) {
+                assertTrue(Store(context).reserveAttendanceClick(slot))
+            }
+            assertFalse(store.reserveAttendanceClick(slot))
+            store.attendanceResult(slot, "请求结果待核验")
+        }
     }
 
     @Test fun windowsAndAttemptsPersistIndependently() {

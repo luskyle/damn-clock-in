@@ -57,9 +57,8 @@ class Store(context: Context) {
     fun attendanceClaimed(slot: ScheduleSlot): Boolean =
         prefs.getString("${slot.name}.attendanceDay", "") == TestPolicy.day(System.currentTimeMillis()).toString()
 
-    fun claimAttendance(slot: ScheduleSlot, mode: AttendanceMode): Boolean {
+    fun startAttendance(slot: ScheduleSlot, mode: AttendanceMode) {
         check(mode != AttendanceMode.NAVIGATION)
-        if (attendanceClaimed(slot)) return false
         check(prefs.edit()
             .putString("${slot.name}.attendanceDay", TestPolicy.day(System.currentTimeMillis()).toString())
             .putString("${slot.name}.attendanceResult", "${mode.label}请求准备发出，结果待核验")
@@ -67,35 +66,17 @@ class Store(context: Context) {
             .putLong("${slot.name}.attendanceStartedAt", System.currentTimeMillis())
             .putBoolean("${slot.name}.attendanceSucceeded", false)
             .commit()) { "Cannot persist attendance claim" }
-        return true
     }
 
     fun attendanceClicks(slot: ScheduleSlot): Int =
-        if (attendanceClaimed(slot)) prefs.getInt("${slot.name}.attendanceClicks", 1) else 0
+        prefs.getInt("${slot.name}.attendanceClicks", 0)
 
     fun attendanceStartedAt(slot: ScheduleSlot): Long =
         prefs.getLong("${slot.name}.attendanceStartedAt", 0)
 
-    fun ensureAttendanceStartedAt(slot: ScheduleSlot): Long {
-        val saved = attendanceStartedAt(slot)
-        if (saved > 0) return saved
-        val now = System.currentTimeMillis()
-        check(prefs.edit().putLong("${slot.name}.attendanceStartedAt", now).commit()) {
-            "Cannot persist retry verification start"
-        }
-        log("旧请求缺少时间依据，本次明确确认的重试将仅核验此刻之后的新增记录，保留原点击预算")
-        return now
-    }
-
-    fun canRetryAttendance(slot: ScheduleSlot): Boolean =
-        attendanceClaimed(slot) && attendanceClicks(slot) in 1 until AttendanceAttempt.MAX_CLICKS &&
-            !prefs.getBoolean("${slot.name}.attendanceSucceeded", false) &&
-            prefs.getString("${slot.name}.attendanceResult", "").orEmpty().let {
-                !it.contains("打卡成功") && !it.contains("已核验")
-            }
-
     fun reserveAttendanceClick(slot: ScheduleSlot): Boolean {
-        if (!attendanceClaimed(slot) || attendanceClicks(slot) >= AttendanceAttempt.MAX_CLICKS) return false
+        if (attendanceStartedAt(slot) == 0L || prefs.getBoolean("${slot.name}.attendanceSucceeded", false) ||
+            attendanceClicks(slot) >= AttendanceAttempt.MAX_CLICKS) return false
         check(prefs.edit().putInt("${slot.name}.attendanceClicks", attendanceClicks(slot) + 1)
             .putString("${slot.name}.attendanceResult", "定位打卡请求处理中，结果待核验")
             .commit()) { "Cannot persist attendance click budget" }
