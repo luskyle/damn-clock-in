@@ -49,7 +49,11 @@ object WakeSession {
     private fun waitForService(context: Context, token: Int, waitUntil: Long) {
         if (generation != token || !active()) return
         val service = NavigationService.instance
-        if (service != null) {
+        val access = NavigationAccess.read(context)
+        if (access == NavigationAccess.DISABLED) {
+            Notice.result(context, access.issue!!)
+            finish()
+        } else if (service != null) {
             service.wakeScreen()
         } else if (SystemClock.elapsedRealtime() >= waitUntil) {
             Notice.result(context, "系统未重新连接无障碍服务，自动启动失败；请检查服务及厂商后台设置")

@@ -15,14 +15,18 @@ class Scheduler(private val context: Context) {
 
     fun exactAllowed(): Boolean = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
 
-    fun requirements(requireConnected: Boolean = true): String? = when {
-        !context.getSystemService(NotificationManager::class.java).areNotificationsEnabled() ->
-            "请先允许通知，确保可以收到失败和解锁提醒"
-        !exactAllowed() -> "请先允许闹钟和提醒（精确定时）"
-        requireConnected && NavigationService.instance == null -> "请先手动开启测试导航无障碍服务"
-        context.packageManager.getLaunchIntentForPackage(TestPolicy.targetPackage) == null ->
-            "未安装 BOE 移动门户"
-        else -> null
+    fun requirements(requireConnected: Boolean = true): String? {
+        val access = NavigationAccess.read(context)
+        return when {
+            !context.getSystemService(NotificationManager::class.java).areNotificationsEnabled() ->
+                "请先允许通知，确保可以收到失败和解锁提醒"
+            !exactAllowed() -> "请先允许闹钟和提醒（精确定时）"
+            access == NavigationAccess.DISABLED ||
+                (requireConnected && access == NavigationAccess.DISCONNECTED) -> access.issue
+            context.packageManager.getLaunchIntentForPackage(TestPolicy.targetPackage) == null ->
+                "未安装 BOE 移动门户"
+            else -> null
+        }
     }
 
     private fun pending(slot: ScheduleSlot): PendingIntent = PendingIntent.getBroadcast(

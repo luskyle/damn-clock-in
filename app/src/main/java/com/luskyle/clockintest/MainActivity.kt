@@ -174,7 +174,9 @@ class MainActivity : Activity() {
         content.space(2)
         content.addView(button("立即测试 · 只到页面", true) {
             val service = NavigationService.instance
-            if (service == null) feedback("请先在运行设置中开启无障碍服务")
+            val issue = NavigationAccess.read(this).issue
+            if (issue != null) feedback(issue)
+            else if (service == null) feedback("无障碍连接已变化，请重试")
             else service.begin()
         }, LinearLayout.LayoutParams(-1, dp(54)))
         content.space(10)
@@ -300,7 +302,7 @@ class MainActivity : Activity() {
         fun entry(label: String, action: () -> Unit) {
             layout.addView(button(label, action = action), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
-        entry("无障碍服务 · ${if (NavigationService.instance != null) "已连接" else "未开启"}") {
+        entry("无障碍服务 · ${NavigationAccess.read(this).label}") {
             AlertDialog.Builder(this).setTitle("${getString(R.string.app_name)} · 仅导航测试")
                 .setMessage(getString(R.string.service_description))
                 .setPositiveButton("前往设置") { _, _ -> settings(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
@@ -317,6 +319,13 @@ class MainActivity : Activity() {
         }
         entry("电池优化 · ${if (battery) "已豁免" else "去设置"}") {
             settings(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+        entry("自启动与后台保护（重要）") {
+            AlertDialog.Builder(this).setTitle("避免清理任务时关闭无障碍")
+                .setMessage("一加 / OPPO：在应用详情 → 耗电管理，开启“允许完全后台行为”和“允许应用自启动”。这与普通电池优化豁免不是同一项；无需为此开启关联启动。\n\n其他品牌请检查本应用的自启动、后台运行和省电限制。允许后台运行可能增加耗电。\n\n正常返回桌面不应要求重新授权；若系统已关闭无障碍，仍需手动开启一次。不能阻止用户强行停止，也不能保证永久授权。")
+                .setPositiveButton("打开应用详情") { _, _ ->
+                    settings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }.setNegativeButton("取消", null).show()
         }
         entry("先检查锁屏显示权限（不导航）") {
             startActivity(Intent(this, WakeActivity::class.java).putExtra("preview", true))
