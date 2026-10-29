@@ -1,14 +1,12 @@
 package com.luskyle.clockintest
 
 import android.app.AlarmManager
-import android.app.KeyguardManager
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.PowerManager
 import kotlin.random.Random
 
 class Scheduler(private val context: Context) {
@@ -17,11 +15,11 @@ class Scheduler(private val context: Context) {
 
     fun exactAllowed(): Boolean = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
 
-    fun requirements(): String? = when {
+    fun requirements(requireConnected: Boolean = true): String? = when {
         !context.getSystemService(NotificationManager::class.java).areNotificationsEnabled() ->
             "请先允许通知，确保可以收到失败和解锁提醒"
         !exactAllowed() -> "请先允许闹钟和提醒（精确定时）"
-        NavigationService.instance == null -> "请先手动开启测试导航无障碍服务"
+        requireConnected && NavigationService.instance == null -> "请先手动开启测试导航无障碍服务"
         context.packageManager.getLaunchIntentForPackage(TestPolicy.targetPackage) == null ->
             "未安装 BOE 移动门户"
         else -> null
@@ -45,8 +43,48 @@ class Scheduler(private val context: Context) {
 
     fun disable() {
         ScheduleSlot.entries.forEach { disableSlot(it) }
+        alarms.cancel(wakeTestPending())
+        check(store.prefs.edit().remove("wakeTestAt").commit()) { "Cannot cancel wake test" }
+        WakeSession.finish()
         NavigationService.instance?.stop("已停止测试和每日计划")
         Notice.result(context, "上下班计划已关闭；不会再自动导航")
+    }
+
+    private fun wakeTestPending(): PendingIntent = PendingIntent.getBroadcast(
+        context, 20, Intent(context, AlarmReceiver::class.java).setAction("wake-test"),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    fun scheduleWakeTest(): Boolean {
+        val issue = requirements()
+        if (issue != null) {
+            Notice.result(context, issue)
+            return false
+        }
+        val time = System.currentTimeMillis() + 120_000
+        try {
+            check(store.prefs.edit().putLong("wakeTestAt", time).commit()) { "Cannot persist wake test" }
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, wakeTestPending())
+            Notice.result(context, "单次息屏测试：${Store.format(time)}；可返回桌面并熄屏，不修改上下班计划")
+            return true
+        } catch (error: SecurityException) {
+            store.prefs.edit().remove("wakeTestAt").apply()
+            Notice.result(context, "单次测试闹钟设置失败：${error.message}")
+            return false
+        }
+    }
+
+    fun fireWakeTest() {
+        val time = store.prefs.getLong("wakeTestAt", 0)
+        if (time == 0L || System.currentTimeMillis() < time) return
+        check(store.prefs.edit().remove("wakeTestAt").commit()) { "Cannot consume wake test" }
+        if (System.currentTimeMillis() > time + 60_000) {
+            Notice.result(context, "单次息屏测试已过期，已跳过")
+            return
+        }
+        val issue = requirements(false)
+        if (issue != null) Notice.result(context, issue)
+        else WakeSession.request(context, time + 60_000)
     }
 
     fun disableSlot(slot: ScheduleSlot) {
@@ -141,19 +179,13 @@ class Scheduler(private val context: Context) {
             Notice.result(context, "${slot.title}今天非工作日、计划已过期或已尝试，已跳过；不补执行")
             return
         }
-        val issue = requirements()
+        val issue = requirements(false)
         if (issue != null) {
             Notice.result(context, "${slot.title}定时测试未运行：$issue；请打开助手手动测试")
             return
         }
-        val keyguard = context.getSystemService(KeyguardManager::class.java)
-        val power = context.getSystemService(PowerManager::class.java)
-        if (keyguard.isKeyguardLocked || !power.isInteractive) {
-            Notice.result(context, "${slot.title}定时已到：请点亮并解锁手机，再打开助手点立即测试；本时段今天不自动重试")
-            return
-        }
         store.log("${slot.title}定时导航测试开始（不提交）")
-        NavigationService.instance?.begin(TestPolicy.end(TestPolicy.day(now), window))
+        WakeSession.request(context, TestPolicy.end(TestPolicy.day(now), window))
     }
 }
 
@@ -161,6 +193,7 @@ class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             "stop" -> Scheduler(context).disable()
+            "wake-test" -> Scheduler(context).fireWakeTest()
             "daily" -> {
                 val slotName = intent.getStringExtra("slot")
                 val slot = ScheduleSlot.entries.find { it.name == slotName }

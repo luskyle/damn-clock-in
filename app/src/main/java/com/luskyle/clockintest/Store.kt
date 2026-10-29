@@ -86,7 +86,7 @@ object Notice {
         )
         val builder = Notification.Builder(context, "test")
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("仅导航测试 · 不提交打卡")
+            .setContentTitle("${context.getString(R.string.app_name)} · 不提交打卡")
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)

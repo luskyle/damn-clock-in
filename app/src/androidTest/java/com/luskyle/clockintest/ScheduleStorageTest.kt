@@ -29,6 +29,9 @@ class ScheduleStorageTest {
         check(ScheduleSlot.entries.none { Store(target).enabled(it) }) {
             "Disable production plans before running instrumented tests"
         }
+        check(Store(target).prefs.getLong("wakeTestAt", 0) == 0L && !WakeSession.active()) {
+            "Cancel the production wake test before running instrumented tests"
+        }
         target.deleteSharedPreferences(fixtureName)
         prepared = true
     }
@@ -116,6 +119,37 @@ class ScheduleStorageTest {
         assertThrows(CalendarUnavailable::class.java) {
             ChinaWorkdays.isWorkday(java.time.LocalDate.of(2027, 1, 1))
         }
+    }
+
+    @Test fun expiredOneShotIsConsumedWithoutWakingOrChangingDailyPlans() {
+        val store = Store(context)
+        store.prefs.edit().putLong("wakeTestAt", System.currentTimeMillis() - 70_000).commit()
+        Scheduler(context).fireWakeTest()
+        assertFalse(store.prefs.contains("wakeTestAt"))
+        assertFalse(WakeSession.active())
+        assertFalse(store.enabled(ScheduleSlot.MORNING))
+        assertFalse(store.enabled(ScheduleSlot.EVENING))
+        assertTrue(store.history().contains("单次息屏测试已过期"))
+        Scheduler(context).fireWakeTest()
+        assertFalse(WakeSession.active())
+    }
+
+    @Test fun prematureOneShotDoesNotConsumeRequest() {
+        val time = System.currentTimeMillis() + 120_000
+        val store = Store(context)
+        store.prefs.edit().putLong("wakeTestAt", time).commit()
+        Scheduler(context).fireWakeTest()
+        assertEquals(time, store.prefs.getLong("wakeTestAt", 0))
+        assertFalse(WakeSession.active())
+    }
+
+    @Test fun stopClearsOneShotAndWakeSession() {
+        val store = Store(context)
+        store.prefs.edit().putLong("wakeTestAt", System.currentTimeMillis() + 120_000).commit()
+        Scheduler(context).disable()
+        assertFalse(store.prefs.contains("wakeTestAt"))
+        assertFalse(WakeSession.active())
+        assertNull(WakeSession.takeDeadline())
     }
 
     @Test fun twoRealAlarmsRestoreAndCancelIndependently() {

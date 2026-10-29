@@ -3,7 +3,13 @@ package com.luskyle.clockintest
 import android.app.UiAutomation
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
+import android.content.ComponentName
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.os.Build
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,6 +32,9 @@ class TimeWindowUiTest {
 
     @Before fun open() {
         check(ScheduleSlot.entries.none { store.enabled(it) }) { "Disable schedules before UI tests" }
+        check(store.prefs.getLong("wakeTestAt", 0) == 0L && !WakeSession.active()) {
+            "Cancel the production wake test before UI tests"
+        }
         originals = ScheduleSlot.entries.associateWith { store.window(it) to store.next(it) }
         openHome()
     }
@@ -79,10 +88,58 @@ class TimeWindowUiTest {
         clickText("取消")
     }
 
+    @Test fun lockscreenPreviewOnlyShowsInstructionsAndCanReturn() {
+        instrumentation.startActivitySync(Intent(instrumentation.targetContext, WakeActivity::class.java)
+            .putExtra("preview", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        find { it.text?.toString()?.contains("此页仅用于提前完成厂商授权") == true }
+        assertFalse(WakeSession.active())
+        clickText("完成，返回助手")
+        find { it.text?.toString() == "永不迟到" }
+        assertFalse(WakeSession.active())
+    }
+
+    @Test fun brandingAndAdaptiveIconAreAppliedWithSafeMargins() {
+        val context = instrumentation.targetContext
+        val manager = context.packageManager
+        assertEquals("永不迟到", context.applicationInfo.loadLabel(manager).toString())
+        assertEquals("永不迟到 · 页面导航（不提交）", manager.getServiceInfo(
+            ComponentName(context, NavigationService::class.java), 0
+        ).loadLabel(manager).toString())
+        val icon = manager.getApplicationIcon(context.packageName)
+        assertTrue(icon is AdaptiveIconDrawable)
+        icon as AdaptiveIconDrawable
+        if (Build.VERSION.SDK_INT >= 33) assertNotNull(icon.monochrome)
+        val bitmap = Bitmap.createBitmap(108, 108, Bitmap.Config.ARGB_8888)
+        try {
+            icon.foreground.setBounds(0, 0, 108, 108)
+            icon.foreground.draw(Canvas(bitmap))
+            var red = 0
+            var gold = 0
+            var blue = 0
+            for (y in 0 until 108) for (x in 0 until 108) {
+                val pixel = bitmap.getPixel(x, y)
+                if (pixel == Color.rgb(255, 75, 54)) red++
+                if (pixel == Color.rgb(232, 190, 97)) gold++
+                if (pixel == Color.rgb(22, 132, 221)) blue++
+                if (Color.alpha(pixel) >= 128) {
+                    val dx = x + 0.5 - 54
+                    val dy = y + 0.5 - 54
+                    assertTrue("Icon artwork exceeds the adaptive safe circle", dx * dx + dy * dy <= 33.5 * 33.5)
+                }
+            }
+            assertTrue("Devil silhouette is missing", red > 300)
+            assertTrue("Trident is missing", gold > 50)
+            assertTrue("Shattered portal icon is missing", blue > 30)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     private fun openHome() {
         instrumentation.startActivitySync(Intent(instrumentation.targetContext, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        find { it.text?.toString() == "每日计划" }
+        find { it.text?.toString() == "永不迟到" }
+        find { it.text?.toString() == "我的打卡时间我做主" }
     }
 
     private fun setTime(prefix: String, hour: Int, minute: Int) {

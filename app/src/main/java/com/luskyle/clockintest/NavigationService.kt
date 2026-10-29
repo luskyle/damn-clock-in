@@ -33,17 +33,29 @@ class NavigationService : AccessibilityService() {
         Store(this).log("测试导航服务已连接；等待用户发起，不自动点击")
     }
 
+    fun wakeScreen() {
+        try {
+            startActivity(WakeSession.wakeIntent(this))
+        } catch (error: ActivityNotFoundException) {
+            stop("无法启动亮屏页面：${error.message}")
+        } catch (error: SecurityException) {
+            stop("系统禁止后台亮屏启动：${error.message}；请检查后台权限")
+        }
+    }
+
     fun begin(until: Long = System.currentTimeMillis() + 45_000) {
         if (running) {
             Store(this).log("已有测试在进行，忽略重复启动")
             return
         }
         if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            WakeSession.finish()
             Notice.result(this, "手机已锁定，请解锁后再测试")
             return
         }
         val launch = packageManager.getLaunchIntentForPackage(TestPolicy.targetPackage)
         if (launch == null) {
+            WakeSession.finish()
             Notice.result(this, "未安装 BOE 移动门户")
             return
         }
@@ -168,6 +180,7 @@ class NavigationService : AccessibilityService() {
     fun stop(message: String) {
         running = false
         handler.removeCallbacks(tick)
+        WakeSession.finish()
         Notice.result(this, message)
     }
 

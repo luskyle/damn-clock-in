@@ -129,9 +129,9 @@ class MainActivity : Activity() {
         val store = Store(this)
         val scheduler = Scheduler(this)
         val content = column().apply { setPadding(dp(20), dp(24), dp(20), dp(24)) }
-        content.addView(text("每日计划", 30f, bold = true))
+        content.addView(text(getString(R.string.app_name), 30f, bold = true))
         content.space(4)
-        content.addView(text("把时间留给自己 · 北京时间", 13f, muted))
+        content.addView(text(getString(R.string.app_tagline), 15f, muted))
         content.space(20)
         content.addView(text("测试模式  /  只到考勤页面，不提交打卡", 12f, teal).apply {
             background = round(Color.rgb(226, 242, 237), 10)
@@ -187,7 +187,7 @@ class MainActivity : Activity() {
         content.card {
             addView(text(if (ready) "运行条件已就绪" else "需要完成运行设置", 15f, bold = true))
             space(5)
-            addView(text("锁屏或熄屏时只提醒，不自动解锁。", 12f, muted))
+            addView(text("定时自动亮屏；安全锁屏需手动解锁。", 12f, muted))
             space(12)
             addView(row().apply {
                 addView(button("运行设置") { showSettings() }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -219,7 +219,7 @@ class MainActivity : Activity() {
             return
         }
         AlertDialog.Builder(this).setTitle("开启${slot.title}页面测试？")
-            .setMessage("中国大陆工作日北京时间 ${Store(this).window(slot)} 随机一次，只导航，不打卡。跳过节假日和普通周末，调休补班执行。\n\n如果已到时间段起点，从下个工作日开始。日历缺失时暂停并提示更新。手机需亮屏、解锁、联网且 BOE 已登录。")
+            .setMessage("中国大陆工作日北京时间 ${Store(this).window(slot)} 随机一次，只导航，不打卡。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；密码/人脸锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录。系统强行停止或关机无法保证执行。")
             .setPositiveButton("开启测试") { _, _ -> scheduler.enable(slot); render() }
             .setNegativeButton("取消") { _, _ -> render() }
             .setOnCancelListener { render() }.show()
@@ -301,7 +301,7 @@ class MainActivity : Activity() {
             layout.addView(button(label, action = action), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
         entry("无障碍服务 · ${if (NavigationService.instance != null) "已连接" else "未开启"}") {
-            AlertDialog.Builder(this).setTitle("仅导航测试")
+            AlertDialog.Builder(this).setTitle("${getString(R.string.app_name)} · 仅导航测试")
                 .setMessage(getString(R.string.service_description))
                 .setPositiveButton("前往设置") { _, _ -> settings(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                 .setNegativeButton("取消", null).show()
@@ -318,13 +318,26 @@ class MainActivity : Activity() {
         entry("电池优化 · ${if (battery) "已豁免" else "去设置"}") {
             settings(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
+        entry("先检查锁屏显示权限（不导航）") {
+            startActivity(Intent(this, WakeActivity::class.java).putExtra("preview", true))
+        }
+        entry("2 分钟后息屏测试（仅一次）") {
+            AlertDialog.Builder(this).setTitle("测试自动亮屏与后台启动")
+                .setMessage("请先在亮屏时完成“锁屏显示权限检查”。确认后助手会关闭首页和最近任务，你可以熄屏，两分钟后尝试亮屏并导航到考勤页，不提交。安全锁屏不会绕过。\n\n不修改上下班计划，不影响每天尝试次数。失败会记录原因；这不是系统的“强行停止”。")
+                .setPositiveButton("安排并退出助手") { _, _ ->
+                    if (Scheduler(this).scheduleWakeTest()) {
+                        settingsPanel?.dismiss()
+                        finishAndRemoveTask()
+                    }
+                }.setNegativeButton("取消", null).show()
+        }
         layout.addView(CheckBox(this).apply {
             text = "专用设备保持面板亮屏"
             textSize = 14f
             isChecked = store.prefs.getBoolean("stayAwake", false)
             setOnCheckedChangeListener { _, checked -> store.prefs.edit().putBoolean("stayAwake", checked).apply() }
         })
-        layout.addView(text("亮屏仅在本面板前台有效。厂商自启动需手动配置；无法绕过安全锁屏、关机或系统强行停止。", 12f, muted))
+        layout.addView(text("保持亮屏选项仅在本面板前台有效；定时任务另有短时唤醒机制。厂商自启动需手动配置；无法绕过安全锁屏、关机或系统强行停止。", 12f, muted))
         settingsPanel = AlertDialog.Builder(this).setTitle("运行设置")
             .setView(ScrollView(this).apply { addView(layout) }).setPositiveButton("完成") { _, _ -> render() }.show()
     }

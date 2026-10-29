@@ -1,5 +1,6 @@
 <resources>
-    <string name="app_name">考勤页面测试助手</string>
-    <string name="service_name">考勤测试导航（不提交）</string>
-    <string name="service_description">仅在你发起测试或启用每日测试时，打开 BOE 移动门户的工作台和考勤入口。绝不点击蓝牙打卡、定位打卡或提交按钮。不收集密码、不上传界面。遇到锁屏、权限或页面不明时停止。开启前请理解此服务可以读取目标应用的界面并点击导航控件。</string>
+    <string name="app_name">永不迟到</string>
+    <string name="app_tagline">我的打卡时间我做主</string>
+    <string name="service_name">永不迟到 · 页面导航（不提交）</string>
+    <string name="service_description">仅在你发起测试或启用每日测试时，唤醒屏幕，打开 BOE 移动门户的工作台和考勤入口。无密码锁屏可请求系统解除；安全锁屏需手动解锁，不绕过认证。绝不点击蓝牙打卡、定位打卡或提交按钮。不收集密码、不上传界面。遇到安全锁屏、权限或页面不明时停止。开启前请理解此服务可以读取目标应用的界面并点击导航控件。</string>
 </resources>
