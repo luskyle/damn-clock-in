@@ -34,6 +34,8 @@ bash scripts/android.sh helper-open
 
 构建 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 真机安装步骤、授权说明、测试边界见 [测试助手说明](docs/android-helper.md)。
+定时、后台唤醒、无障碍三态、一加后台保护及可靠性边界详见
+[后台唤醒与无障碍实现机制](docs/background-accessibility.md)。
 
 ## CI/CD 与交付
 
