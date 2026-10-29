@@ -116,11 +116,18 @@ class TimeWindowUiTest {
             var red = 0
             var gold = 0
             var blue = 0
+            val letters = Rect(108, 108, 0, 0)
             for (y in 0 until 108) for (x in 0 until 108) {
                 val pixel = bitmap.getPixel(x, y)
                 if (pixel == Color.rgb(255, 75, 54)) red++
                 if (pixel == Color.rgb(232, 190, 97)) gold++
                 if (pixel == Color.rgb(22, 132, 221)) blue++
+                if (pixel == Color.WHITE) {
+                    letters.left = minOf(letters.left, x)
+                    letters.top = minOf(letters.top, y)
+                    letters.right = maxOf(letters.right, x + 1)
+                    letters.bottom = maxOf(letters.bottom, y + 1)
+                }
                 if (Color.alpha(pixel) >= 128) {
                     val dx = x + 0.5 - 54
                     val dy = y + 0.5 - 54
@@ -130,6 +137,8 @@ class TimeWindowUiTest {
             assertTrue("Devil silhouette is missing", red > 300)
             assertTrue("Trident is missing", gold > 50)
             assertTrue("Shattered portal icon is missing", blue > 30)
+            assertTrue("BOE lettering is too narrow: ${letters.width()}", letters.width() >= 21)
+            assertTrue("BOE lettering is too short: ${letters.height()}", letters.height() >= 11)
         } finally {
             bitmap.recycle()
         }
