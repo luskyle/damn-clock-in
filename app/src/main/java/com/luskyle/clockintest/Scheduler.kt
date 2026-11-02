@@ -49,8 +49,9 @@ class Scheduler(private val context: Context) {
         ScheduleSlot.entries.forEach { disableSlot(it) }
         alarms.cancel(wakeTestPending())
         check(store.prefs.edit().remove("wakeTestAt").commit()) { "Cannot cancel wake test" }
+        if (NavigationService.instance != null) NavigationService.instance?.stop("已停止导航和每日计划")
+        else WakeSession.fail(context, "已停止导航和每日计划")
         WakeSession.finish()
-        NavigationService.instance?.stop("已停止导航和每日计划")
         Notice.result(context, "上下班计划已关闭；不会再自动导航")
     }
 
@@ -126,6 +127,8 @@ class Scheduler(private val context: Context) {
             disableSlot(slot)
             store.setNext(slot, 0)
             Notice.result(context, "${slot.title}：精确闹钟权限缺失，无法恢复计划；请授权后重新启用")
+            NotificationDelivery.result(context, slot, System.currentTimeMillis(), false, false,
+                "精确闹钟权限缺失，计划已关闭，请授权后重新启用")
             return
         }
         val now = System.currentTimeMillis()
@@ -142,6 +145,8 @@ class Scheduler(private val context: Context) {
             disableSlot(slot)
             store.setNext(slot, 0)
             Notice.result(context, "${slot.title}：${error.message}")
+            NotificationDelivery.result(context, slot, System.currentTimeMillis(), false, false,
+                "工作日日历不可用，无法安排计划，计划已关闭")
         }
     }
 
@@ -154,6 +159,8 @@ class Scheduler(private val context: Context) {
             disableSlot(slot)
             store.setNext(slot, 0)
             Notice.result(context, "${slot.title}设置闹钟失败：${error.message}；请检查精确闹钟权限")
+            NotificationDelivery.result(context, slot, System.currentTimeMillis(), false, false,
+                "系统拒绝设置打卡闹钟，计划已关闭，请检查精确闹钟权限")
         }
     }
 
@@ -168,6 +175,7 @@ class Scheduler(private val context: Context) {
             disableSlot(slot)
             store.setNext(slot, 0)
             Notice.result(context, "${slot.title}：${error.message}")
+            NotificationDelivery.result(context, slot, planned, false, false, "工作日日历不可用，未执行打卡")
             return
         }
         val window = store.window(slot)
@@ -181,10 +189,14 @@ class Scheduler(private val context: Context) {
         }
         if (!eligible) {
             Notice.result(context, "${slot.title}今天非工作日、计划已过期或已尝试，已跳过；不补执行")
+            if (workday && store.attempted(slot) != day) {
+                NotificationDelivery.result(context, slot, planned, false, false, "打卡计划已过期，未执行")
+            }
             return
         }
         val issue = requirements(false)
         if (issue != null) {
+            NotificationDelivery.result(context, slot, planned, false, false, issue)
             Notice.result(context, "${slot.title}定时测试未运行：$issue；请打开助手手动测试")
             return
         }
@@ -205,6 +217,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 else {
                     Store(context).log("旧版或无效计划触发，重新恢复上下班计划")
                     Scheduler(context).restore()
+                    NotificationDelivery.schedule(context)
                 }
             }
         }

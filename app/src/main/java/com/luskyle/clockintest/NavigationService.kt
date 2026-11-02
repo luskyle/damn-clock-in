@@ -6,6 +6,7 @@ import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Handler
+import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
 import android.os.PowerManager
@@ -13,6 +14,9 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONException
+import java.io.IOException
+import java.security.GeneralSecurityException
 
 class NavigationService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -31,6 +35,27 @@ class NavigationService : AccessibilityService() {
     private var reentered = false
     private var waitingForReentry = false
     private var finishingSuccess = false
+    private var startedAt = 0L
+    private var loginOnly = false
+    private var loginStarted = false
+    private var userInitiated = false
+    private var loginAttempt: BoeLoginAttempt? = null
+    private var loginCredentials: BoeCredentials? = null
+    private val idleLogin = Runnable {
+        if (!running && !finishingSuccess &&
+            !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            val settings = BoeLoginSettings(this)
+            val root = rootInActiveWindow
+            if (settings.configured() && !settings.paused() &&
+                root?.packageName?.toString() == TestPolicy.targetPackage) {
+                val nodes = flatten(root).filter { it.isVisibleToUser }
+                val texts = nodes.filter { !it.isEditable && !it.isPassword }
+                    .mapNotNull { it.text?.toString() }.toSet()
+                val ids = nodes.mapNotNull { it.viewIdResourceName }.toSet()
+                if (BoeLoginPolicy.needsLogin(texts, ids, activity)) begin(loginOnly = true)
+            }
+        }
+    }
     private val tick = object : Runnable {
         override fun run() {
             if (!running) return
@@ -42,6 +67,7 @@ class NavigationService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         Store(this).log("考勤辅助服务已连接；等待用户发起或已启用的计划")
+        handler.postDelayed(idleLogin, 500)
     }
 
     fun wakeScreen() {
@@ -57,26 +83,38 @@ class NavigationService : AccessibilityService() {
     fun begin(
         until: Long = System.currentTimeMillis() + 60_000,
         slot: ScheduleSlot? = null,
-        previewMode: AttendanceMode? = null
+        previewMode: AttendanceMode? = null,
+        loginOnly: Boolean = false,
+        userInitiated: Boolean = false
     ) {
         if (running || finishingSuccess) {
             Notice.result(this, "当前请求仍在执行或收尾，请等待本轮结束后再次打卡")
             return
         }
         if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            if (slot != null && previewMode == null)
+                NotificationDelivery.result(this, slot, System.currentTimeMillis(), false, false, "手机已锁定，未能启动打卡")
             WakeSession.finish()
             Notice.result(this, "手机已锁定，请解锁后再测试")
             return
         }
         val launch = packageManager.getLaunchIntentForPackage(TestPolicy.targetPackage)
         if (launch == null) {
+            if (slot != null && previewMode == null)
+                NotificationDelivery.result(this, slot, System.currentTimeMillis(), false, false, "未安装 BOE 移动门户")
             WakeSession.finish()
             Notice.result(this, "未安装 BOE 移动门户")
             return
         }
         val dryRun = previewMode != null
         val mode = previewMode ?: if (slot == null) AttendanceMode.NAVIGATION else AttendanceMode.LOCATION
+        this.loginOnly = loginOnly
+        this.userInitiated = userInitiated
+        loginStarted = false
+        loginAttempt = null
+        loginCredentials = null
         running = true
+        startedAt = System.currentTimeMillis()
         attempt = AttendanceAttempt(mode, dryRun)
         attendanceSlot = slot
         submittedAt = 0
@@ -91,6 +129,7 @@ class NavigationService : AccessibilityService() {
         deadline = minOf(until, System.currentTimeMillis() + duration)
         elapsedDeadline = SystemClock.elapsedRealtime() + duration
         val purpose = when {
+            loginOnly -> "BOE 重新登录测试（不提交打卡）"
             dryRun -> "${mode.label}预检（不点击打卡）"
             mode == AttendanceMode.NAVIGATION -> "页面测试（不提交）"
             else -> "${slot?.title}${mode.label}（可能写入真实考勤）"
@@ -98,7 +137,8 @@ class NavigationService : AccessibilityService() {
         Notice.show(this, "正在运行：$purpose", true)
         Store(this).log("开始$purpose")
         try {
-            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (!loginOnly || rootInActiveWindow?.packageName?.toString() != TestPolicy.targetPackage)
+                startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             handler.postDelayed(tick, 1000)
         } catch (error: ActivityNotFoundException) {
             stop("无法启动 BOE：${error.message}")
@@ -108,17 +148,26 @@ class NavigationService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!running || event == null) return
+        if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.packageName?.toString() == TestPolicy.targetPackage) {
             val name = event.className?.toString() ?: ""
             if (name.startsWith("com.meicloud.") || name.startsWith("com.mobile.boe.")) activity = name
         }
+        if (event.packageName?.toString() != TestPolicy.targetPackage) return
+        if (running && loginAttempt != null &&
+            event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
+            BoeLoginPolicy.rejected(event.text.map { it.toString() }.toSet())) {
+            stop("BOE 拒绝登录；已暂停自动重试，请检查帐号密码或手动处理后重新保存配置")
+        } else if (!running && !handler.hasCallbacks(idleLogin)) {
+            handler.postDelayed(idleLogin, 300)
+        }
     }
 
     private fun inspect() {
         if (System.currentTimeMillis() >= deadline || SystemClock.elapsedRealtime() >= elapsedDeadline) {
-            stop("运行超时或已超过时间窗口；已停止")
+            stop(if (loginAttempt != null) "BOE 自动登录超时或已超过时间窗口；未核验成功，已暂停自动重试"
+                else "运行超时或已超过时间窗口；已停止")
             return
         }
         if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
@@ -135,10 +184,12 @@ class NavigationService : AccessibilityService() {
             return
         }
         val nodes = flatten(root)
-        val texts = nodes.filter { it.isVisibleToUser }.mapNotNull { it.text?.toString() }.toSet()
-        if (texts.any { it in setOf("请输入用户名", "请输入密码", "欢迎登录") } ||
-            activity.contains("Login") || activity.contains("LockActivity")) {
-            stop("账号需要登录或解锁；请手动处理，测试已停止")
+        val texts = nodes.filter { it.isVisibleToUser && !it.isEditable && !it.isPassword }
+            .mapNotNull { it.text?.toString() }.toSet()
+        if (inspectLogin(nodes, texts)) return
+        if (loginOnly) {
+            if (loginControl(nodes, BoeLoginPolicy.HOME) != null)
+                stop("BOE 已处于登录状态；未验证所保存的帐号密码，未提交打卡")
             return
         }
         if (attempt.mode != AttendanceMode.NAVIGATION &&
@@ -217,6 +268,130 @@ class NavigationService : AccessibilityService() {
             returnedHome = true
             if (!performGlobalAction(GLOBAL_ACTION_BACK)) stop("无法返回工作台；请手动返回再测试")
         }
+    }
+
+    private fun loginControl(nodes: List<AccessibilityNodeInfo>, id: String): AccessibilityNodeInfo? =
+        nodes.filter {
+            it.packageName?.toString() == TestPolicy.targetPackage &&
+                it.viewIdResourceName == id && it.isVisibleToUser
+        }.singleOrNull()
+
+    private fun inspectLogin(nodes: List<AccessibilityNodeInfo>, texts: Set<String>): Boolean {
+        val username = loginControl(nodes, BoeLoginPolicy.USERNAME)
+        val password = loginControl(nodes, BoeLoginPolicy.PASSWORD)
+        val submit = loginControl(nodes, BoeLoginPolicy.SUBMIT)
+        val privacy = loginControl(nodes, BoeLoginPolicy.PRIVACY)
+        val home = loginControl(nodes, BoeLoginPolicy.HOME) != null
+        val form = username?.isEditable == true && password?.isEditable == true &&
+            submit?.text?.toString() == "登录"
+        val kicked = BoeLoginPolicy.kickedOut(texts)
+        val needsLogin = kicked || form || (!home &&
+            BoeLoginPolicy.needsLogin(texts, nodes.mapNotNull { it.viewIdResourceName }.toSet(), activity))
+        if (loginAttempt == null && !needsLogin) return false
+        if (attempt.clicked) {
+            stop("点击打卡后 BOE 要求重新登录；已停止，需先核验原请求结果，不自动重新提交打卡")
+            return true
+        }
+        val settings = BoeLoginSettings(this)
+        if (!settings.configured()) {
+            stop("BOE 账号需要重新登录；请在运行设置配置 BOE 帐号密码，或手动登录")
+            return true
+        }
+        try {
+            if (loginAttempt == null) {
+                if (!BoeLoginPolicy.canStart(settings.paused(), userInitiated, loginStarted)) {
+                    stop(if (loginStarted) "本轮已经重新登录过，BOE 再次要求登录；已停止，避免反复抢占其他设备会话"
+                        else "BOE 自动登录已暂停；请检查帐号密码，主动点击测试或立即打卡可重新尝试一次")
+                    return true
+                }
+                if (settings.paused()) {
+                    settings.allowRetry()
+                    Store(this).log("用户主动发起新请求，允许本轮单次 BOE 填充和重新登录")
+                }
+                settings.markStarted(requireNotNull(settings.revision()))
+                val credentials = settings.load()
+                loginCredentials = credentials
+                loginAttempt = BoeLoginAttempt()
+                loginStarted = true
+                Store(this).log("检测到 BOE 需要登录，开始本轮单次自动重新登录；不记录帐号密码")
+            }
+            val credentials = requireNotNull(loginCredentials)
+            if (settings.revision() != credentials.revision) {
+                stop("BOE 登录配置已更改或删除，已停止本轮自动登录")
+                return true
+            }
+            val flow = requireNotNull(loginAttempt)
+            val step = flow.next(BoeLoginScreen(TestPolicy.targetPackage, kicked, form, home,
+                BoeLoginPolicy.humanVerification(texts, activity), BoeLoginPolicy.rejected(texts),
+                privacy?.isCheckable == true && !privacy.isChecked, submit?.isEnabled == true))
+            val accepted = when (step) {
+                BoeLoginStep.WAIT -> return true
+                BoeLoginStep.HUMAN -> {
+                    stop("BOE 登录需要验证码、人脸或安全解锁；已暂停自动重试，请手动处理后重新保存配置")
+                    return true
+                }
+                BoeLoginStep.REJECTED -> {
+                    stop("BOE 未接受登录或协议确认；已暂停自动重试，请检查帐号密码或手动处理后重新保存配置")
+                    return true
+                }
+                BoeLoginStep.SUCCESS -> {
+                    settings.markSuccessful(credentials.revision)
+                    loginAttempt = null
+                    loginCredentials = null
+                    activity = ""
+                    clickedEntry = false
+                    clickedWorkbench = false
+                    returnedHome = false
+                    Store(this).log("已确认 BOE 登录后工作台，继续原流程；登录本身不代表打卡成功")
+                    if (loginOnly) stop("BOE 重新登录已核验；未提交打卡")
+                    return true
+                }
+                BoeLoginStep.CONFIRM_KICK -> {
+                    val confirm = loginControl(nodes, BoeLoginPolicy.CONFIRM)
+                    confirm?.text?.toString() == "确定" && loginAction(confirm, AccessibilityNodeInfo.ACTION_CLICK)
+                }
+                BoeLoginStep.FILL_FORM -> {
+                    username?.isEnabled == true && password?.isEnabled == true &&
+                        loginAction(username, AccessibilityNodeInfo.ACTION_SET_TEXT, credentials.username) &&
+                        loginAction(password, AccessibilityNodeInfo.ACTION_SET_TEXT, credentials.password)
+                }
+                BoeLoginStep.ACCEPT_PRIVACY -> privacy != null &&
+                    loginAction(privacy, AccessibilityNodeInfo.ACTION_CLICK)
+                BoeLoginStep.SUBMIT -> {
+                    username?.text?.toString() == credentials.username && submit != null &&
+                        loginAction(submit, AccessibilityNodeInfo.ACTION_CLICK)
+                }
+            }
+            if (!accepted) stop("BOE 登录控件不唯一、状态变化或操作被拒绝；已暂停自动重试，请手动检查")
+            else {
+                flow.completed(step)
+                if (step == BoeLoginStep.SUBMIT) Store(this).log("已提交本轮唯一一次 BOE 登录请求，等待工作台核验")
+            }
+        } catch (_: SecurityException) {
+            stop("系统禁止访问 BOE 登录控件或凭据密钥；已停止，请检查无障碍及系统权限")
+        } catch (_: GeneralSecurityException) {
+            stop("无法解密 BOE 登录配置，请在运行设置重新填写帐号密码")
+        } catch (_: IOException) {
+            stop("无法访问 BOE 登录加密密钥，请检查系统密钥状态")
+        } catch (_: JSONException) {
+            stop("BOE 登录配置不可识别，请重新填写帐号密码")
+        } catch (_: IllegalArgumentException) {
+            stop("BOE 登录配置不完整，请重新填写帐号密码")
+        } catch (_: IllegalStateException) {
+            stop("无法保存 BOE 登录尝试状态，或配置已改变；已停止，请检查存储及配置")
+        }
+        return true
+    }
+
+    private fun loginAction(node: AccessibilityNodeInfo, action: Int, value: String? = null): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != TestPolicy.targetPackage || root.windowId != node.windowId ||
+            !node.refresh() || !node.isEnabled || !node.isVisibleToUser) return false
+        return if (action == AccessibilityNodeInfo.ACTION_SET_TEXT) {
+            node.isEditable && node.performAction(action, Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+            })
+        } else node.isClickable && node.performAction(action)
     }
 
     private fun inspectAttendance(nodes: List<AccessibilityNodeInfo>, texts: Set<String>) {
@@ -302,7 +477,15 @@ class NavigationService : AccessibilityService() {
         val lockScreen = running && attempt.shouldLockScreen(success)
         val result = if (submitted && !success) "$message；已尝试点击打卡，结果待核验" else message
         if (submitted) attendanceSlot?.let { Store(this).attendanceResult(it, result, success) }
+        val reportSlot = if (running) attendanceSlot.takeUnless { attempt.dryRun } else WakeSession.attendanceSlot
+        reportSlot?.let {
+            NotificationDelivery.result(this, it, if (running) startedAt else System.currentTimeMillis(),
+                success, submitted, result)
+        }
         running = false
+        loginOnly = false
+        loginAttempt = null
+        loginCredentials = null
         handler.removeCallbacks(tick)
         WakeSession.finish()
         attempt = AttendanceAttempt(AttendanceMode.NAVIGATION, false)
@@ -372,6 +555,7 @@ class NavigationService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(idleLogin)
         if (running) stop("导航服务已关闭，测试已停止")
         instance = null
         super.onDestroy()

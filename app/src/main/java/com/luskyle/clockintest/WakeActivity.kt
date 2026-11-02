@@ -100,8 +100,7 @@ class WakeActivity : Activity() {
 
     private fun fail(message: String) {
         handler.removeCallbacksAndMessages(null)
-        WakeSession.finish()
-        Notice.result(this, message)
+        WakeSession.fail(this, message)
         finish()
     }
 

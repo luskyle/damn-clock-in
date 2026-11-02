@@ -21,13 +21,17 @@ object WakeSession {
     fun request(context: Context, deadline: Long, slot: ScheduleSlot? = null) {
         if (active()) {
             Store(context).log("已有唤醒或导航请求，忽略重复触发")
+            slot?.let {
+                NotificationDelivery.result(context, it, System.currentTimeMillis(), false, false,
+                    "已有其他唤醒任务，本次定时打卡未启动")
+            }
             return
         }
         finish()
         attendanceSlot = slot
         val duration = minOf(65_000L, deadline - System.currentTimeMillis())
         if (duration <= 0) {
-            Notice.result(context, "唤醒请求已过期，未启动")
+            fail(context, "唤醒请求已过期，未启动")
             return
         }
         until = deadline
@@ -41,7 +45,7 @@ object WakeSession {
         timeout = Runnable {
             if (generation == token) {
                 NavigationService.instance?.stop("后台唤醒或导航超时，已停止；请检查自启动、后台运行和无障碍权限")
-                    ?: Notice.result(context, "后台唤醒超时：无障碍服务未连接，请检查系统设置")
+                    ?: fail(context, "后台唤醒超时：无障碍服务未连接，请检查系统设置")
                 finish()
             }
         }.also { handler.postDelayed(it, duration) }
@@ -54,13 +58,11 @@ object WakeSession {
         val service = NavigationService.instance
         val access = NavigationAccess.read(context)
         if (access == NavigationAccess.DISABLED) {
-            Notice.result(context, access.issue!!)
-            finish()
+            fail(context, access.issue!!)
         } else if (service != null) {
             service.wakeScreen()
         } else if (SystemClock.elapsedRealtime() >= waitUntil) {
-            Notice.result(context, "系统未重新连接无障碍服务，自动启动失败；请检查服务及厂商后台设置")
-            finish()
+            fail(context, "系统未重新连接无障碍服务，自动启动失败；请检查服务及厂商后台设置")
         } else {
             handler.postDelayed({ waitForService(context, token, waitUntil) }, 500)
         }
@@ -76,6 +78,14 @@ object WakeSession {
 
     fun wakeIntent(context: Context): Intent = Intent(context, WakeActivity::class.java)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+
+    fun fail(context: Context, reason: String) {
+        attendanceSlot?.let {
+            NotificationDelivery.result(context, it, System.currentTimeMillis(), false, false, reason)
+        }
+        finish()
+        Notice.result(context, reason)
+    }
 
     fun finish() {
         generation++

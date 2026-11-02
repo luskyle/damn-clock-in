@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var scroll: ScrollView? = null
     private var settingsPanel: AlertDialog? = null
+    private var barkPanel: AlertDialog? = null
+    private var boeLoginPanel: AlertDialog? = null
     private val updateUi = Runnable { render() }
     private val changes = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         handler.removeCallbacks(updateUi)
@@ -57,6 +59,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Store(this).prefs.registerOnSharedPreferenceChangeListener(changes)
+        NotificationDelivery.schedule(this)
         render()
     }
 
@@ -65,6 +68,10 @@ class MainActivity : Activity() {
         handler.removeCallbacks(updateUi)
         settingsPanel?.dismiss()
         settingsPanel = null
+        barkPanel?.dismiss()
+        barkPanel = null
+        boeLoginPanel?.dismiss()
+        boeLoginPanel = null
         super.onPause()
     }
 
@@ -181,7 +188,7 @@ class MainActivity : Activity() {
             val issue = NavigationAccess.read(this).issue
             if (issue != null) feedback(issue)
             else if (service == null) feedback("无障碍连接已变化，请重试")
-            else service.begin()
+            else service.begin(userInitiated = true)
         }, LinearLayout.LayoutParams(-1, dp(54)))
         content.space(10)
         content.addView(button("立即打卡 · 需再次确认") { confirmAttendance(dryRun = false) },
@@ -233,7 +240,7 @@ class MainActivity : Activity() {
         val store = Store(this)
         val action = "定位打卡，每轮最多自动点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏"
         AlertDialog.Builder(this).setTitle("开启${slot.title}计划？")
-            .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
+            .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录，或在运行设置保存 BOE 帐号密码以自动重新登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
             .setPositiveButton("确认开启") { _, _ -> scheduler.enable(slot); render() }
             .setNegativeButton("取消") { _, _ -> render() }
             .setOnCancelListener { render() }.show()
@@ -250,9 +257,13 @@ class MainActivity : Activity() {
                     .setPositiveButton(if (dryRun) "开始预检" else "确认真实打卡") { _, _ ->
                         val issue = NavigationAccess.read(this).issue
                         val service = NavigationService.instance
-                        if (issue != null) feedback(issue)
-                        else if (service == null) feedback("无障碍连接已变化，请重试")
-                        else service.begin(slot = slot, previewMode = if (dryRun) mode else null)
+                        if (issue != null || service == null) {
+                            val reason = issue ?: "无障碍连接已变化，请重试"
+                            feedback(reason)
+                            if (!dryRun) NotificationDelivery.result(this, slot, System.currentTimeMillis(), false, false, reason)
+                        }
+                        else service.begin(slot = slot, previewMode = if (dryRun) mode else null,
+                            userInitiated = true)
                     }.setNegativeButton("取消", null).show()
             }.setNegativeButton("取消", null).show()
     }
@@ -331,6 +342,16 @@ class MainActivity : Activity() {
         val layout = column().apply { setPadding(dp(24), dp(8), dp(24), dp(12)) }
         fun entry(label: String, action: () -> Unit) {
             layout.addView(button(label, action = action), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        }
+        entry("BOE 帐号与自动登录 · ${if (BoeLoginSettings(this).configured()) "已配置" else "未配置"}") {
+            settingsPanel?.dismiss()
+            settingsPanel = null
+            boeLoginPanel = BoeLoginSettingsDialog.show(this)
+        }
+        entry("Bark 推送到 iPhone · ${if (BarkSettings(this).configured()) "已配置" else "未配置"}") {
+            settingsPanel?.dismiss()
+            settingsPanel = null
+            barkPanel = BarkSettingsDialog.show(this)
         }
         entry("无障碍服务 · ${NavigationAccess.read(this).label}") {
             AlertDialog.Builder(this).setTitle("${getString(R.string.app_name)} · 考勤辅助")
