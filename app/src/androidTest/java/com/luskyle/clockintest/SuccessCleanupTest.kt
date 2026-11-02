@@ -2,6 +2,7 @@ package com.luskyle.clockintest
 
 import android.app.UiAutomation
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -33,6 +34,10 @@ class SuccessCleanupTest {
         }
         await { !context.getSystemService(PowerManager::class.java).isInteractive }
         val history = store.history()
+        assertTrue(history.contains("已确认系统强行停止 BOE"))
+        @Suppress("DEPRECATION")
+        val flags = context.packageManager.getApplicationInfo(TestPolicy.targetPackage, 0).flags
+        assertTrue(flags and ApplicationInfo.FLAG_STOPPED != 0)
         assertTrue(history.contains("已确认 BOE 不在前台，接下来锁屏息屏"))
         assertTrue(history.indexOf("已请求系统锁屏息屏") < history.indexOf("已确认 BOE 不在前台"))
         assertFalse(WakeSession.active())

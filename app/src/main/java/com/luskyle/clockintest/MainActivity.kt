@@ -140,7 +140,7 @@ class MainActivity : Activity() {
         content.space(4)
         content.addView(text(getString(R.string.app_tagline), 15f, muted))
         content.space(20)
-        content.addView(text("定位打卡  /  成功后退出 BOE 并息屏", 12f, teal).apply {
+        content.addView(text("定位打卡  /  成功后强行停止 BOE 并息屏", 12f, teal).apply {
             background = round(Color.rgb(226, 242, 237), 10)
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }, LinearLayout.LayoutParams(-1, -2))
@@ -238,7 +238,7 @@ class MainActivity : Activity() {
             return
         }
         val store = Store(this)
-        val action = "定位打卡，每轮最多自动点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏"
+        val action = "定位打卡，每轮最多自动点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后通过系统应用详情强行停止 BOE，再返回桌面并锁屏息屏；不清除登录数据。强行停止会停止 BOE 后台服务和消息，直到下次打开"
         AlertDialog.Builder(this).setTitle("开启${slot.title}计划？")
             .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录，或在运行设置保存 BOE 帐号密码以自动重新登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
             .setPositiveButton("确认开启") { _, _ -> scheduler.enable(slot); render() }
@@ -253,7 +253,7 @@ class MainActivity : Activity() {
                 val slot = ScheduleSlot.entries[index]
                 AlertDialog.Builder(this).setTitle("${slot.title}${mode.label}")
                     .setMessage(if (dryRun) "仅打开页面并检查唯一可点击按钮，不点击打卡。"
-                        else "将发起新一轮真实定位打卡，不限制当天手动发起次数；今天已成功或之前用完重试次数也可以再次打卡。\n\n每轮最多自动点击三次，每次先等十秒核验，可返回重进一次；本轮结束后可以再次手动发起，不改动定时计划。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后返回桌面退出 BOE 前台，再自动锁屏息屏；不点击额外弹窗、不绕过验证。")
+                        else "将发起新一轮真实定位打卡，不限制当天手动发起次数；今天已成功或之前用完重试次数也可以再次打卡。\n\n每轮最多自动点击三次，每次先等十秒核验，可返回重进一次；本轮结束后可以再次手动发起，不改动定时计划。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后在系统应用详情强行停止 BOE，再返回桌面并锁屏息屏；BOE 后台服务及消息停止，直到下次打开，不清除登录数据。不批准额外考勤弹窗、不绕过验证。")
                     .setPositiveButton(if (dryRun) "开始预检" else "确认真实打卡") { _, _ ->
                         val issue = NavigationAccess.read(this).issue
                         val service = NavigationService.instance

@@ -5,6 +5,8 @@ import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.net.Uri
 import android.os.Handler
 import android.os.Bundle
 import android.os.Looper
@@ -236,7 +238,7 @@ class NavigationService : AccessibilityService() {
             return
         }
         if (clickedEntry) {
-            if (activity.startsWith("com.meicloud.appbrand.AppBrandUI") &&
+            if (!attempt.clicked && activity.startsWith("com.meicloud.appbrand.AppBrandUI") &&
                 System.currentTimeMillis() - entryClickedAt >= 5000) {
                 stop("已打开考勤入口；小程序内容不可读，需人工确认页面（未点击打卡）")
             }
@@ -512,6 +514,81 @@ class NavigationService : AccessibilityService() {
     internal fun exitBoeAndLockScreen(result: String) {
         if (finishingSuccess) return
         finishingSuccess = true
+        val settingsIntent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${TestPolicy.targetPackage}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (settingsIntent.resolveActivity(packageManager)?.packageName != BoeStopPolicy.SETTINGS) {
+            Notice.result(this, "$result；本机应用详情不受支持，无法强行停止 BOE，请手动处理")
+            returnHomeAndLockScreen(result)
+            return
+        }
+        try {
+            startActivity(settingsIntent)
+        } catch (_: ActivityNotFoundException) {
+            Notice.result(this, "$result；无法打开 BOE 应用详情，未强行停止")
+            returnHomeAndLockScreen(result)
+            return
+        } catch (_: SecurityException) {
+            Notice.result(this, "$result；系统禁止打开 BOE 应用详情，未强行停止")
+            returnHomeAndLockScreen(result)
+            return
+        }
+        val stopDeadline = SystemClock.elapsedRealtime() + 10_000
+        var requested = false
+        var confirmed = false
+        val stopBoe = object : Runnable {
+            override fun run() {
+                if (!finishingSuccess) return
+                @Suppress("DEPRECATION")
+                val stopped = packageManager.getApplicationInfo(TestPolicy.targetPackage, 0).flags and
+                    ApplicationInfo.FLAG_STOPPED != 0
+                if (stopped) {
+                    Store(this@NavigationService).log("已确认系统强行停止 BOE，应用处于 stopped 状态")
+                    returnHomeAndLockScreen(result)
+                    return
+                }
+                if (SystemClock.elapsedRealtime() >= stopDeadline) {
+                    Notice.result(this@NavigationService, "$result；未确认 BOE 已强行停止，请手动检查；仍尝试息屏")
+                    returnHomeAndLockScreen(result)
+                    return
+                }
+                val root = rootInActiveWindow
+                if (root?.packageName?.toString() == BoeStopPolicy.SETTINGS) {
+                    val nodes = flatten(root).filter { it.isVisibleToUser }
+                    fun unique(id: String) = nodes.filter { it.viewIdResourceName == id }.singleOrNull()
+                    val button = unique(BoeStopPolicy.STOP_BUTTON)
+                    val confirm = unique(BoeStopPolicy.CONFIRM)
+                    val message = unique("android:id/message")?.text?.toString().orEmpty()
+                    val target = when {
+                        !requested && BoeStopPolicy.isBoeDetails(BoeStopPolicy.SETTINGS,
+                            unique(BoeStopPolicy.APP_NAME)?.text?.toString().orEmpty()) &&
+                            button?.text?.toString() == "强行停止" -> button
+                        !confirmed && BoeStopPolicy.isConfirmation(BoeStopPolicy.SETTINGS, message,
+                            confirm?.text?.toString().orEmpty(), requested) -> confirm
+                        else -> null
+                    }
+                    if (target != null && target.isEnabled && target.isClickable &&
+                        target.packageName?.toString() == BoeStopPolicy.SETTINGS &&
+                        target.windowId == root.windowId) {
+                        val accepted = try {
+                            target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        } catch (_: SecurityException) {
+                            false
+                        }
+                        if (!accepted) {
+                            Notice.result(this@NavigationService, "$result；系统拒绝强行停止 BOE 操作，请手动检查")
+                            returnHomeAndLockScreen(result)
+                            return
+                        }
+                        if (!requested) requested = true else confirmed = true
+                    }
+                }
+                handler.postDelayed(this, 300)
+            }
+        }
+        handler.postDelayed(stopBoe, 500)
+    }
+
+    private fun returnHomeAndLockScreen(result: String) {
         val homeAccepted = try {
             performGlobalAction(GLOBAL_ACTION_HOME)
         } catch (error: SecurityException) {
@@ -521,7 +598,7 @@ class NavigationService : AccessibilityService() {
         if (!homeAccepted) {
             Notice.result(this, "$result；系统拒绝退出 BOE 前台，请手动返回桌面")
         } else {
-            Store(this).log("打卡成功收尾：已请求返回系统桌面，不强行停止 BOE")
+            Store(this).log("打卡成功收尾：已请求返回系统桌面")
         }
         val homeDeadline = SystemClock.elapsedRealtime() + 2000
         val finish = object : Runnable {
