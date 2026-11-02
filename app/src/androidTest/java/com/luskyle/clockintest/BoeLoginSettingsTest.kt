@@ -79,6 +79,44 @@ class BoeLoginSettingsTest {
         assertEquals("synthetic-password", settings.load().password)
     }
 
+    @Test fun rejectionSurvivesRestartButNewConfigurationOrExplicitRetryClearsIt() = fixture { context ->
+        val settings = BoeLoginSettings(context)
+        settings.save("synthetic-account", "synthetic-password", true)
+        settings.markStarted(settings.load().revision)
+        assertFalse(BoeLoginSettings(context).blocked())
+        settings.block(settings.load().revision)
+        assertTrue(BoeLoginSettings(context).blocked())
+        assertTrue(BoeLoginSettings(context).paused())
+        settings.allowRetry()
+        assertFalse(settings.blocked())
+        settings.block(settings.load().revision)
+        settings.save("synthetic-account", "updated-password", true)
+        assertFalse(settings.blocked())
+        assertFalse(settings.paused())
+    }
+
+    @Test fun scheduledAttendanceCanRecoverInterruptedLoginWithoutChangingSavedCredentials() = fixture { context ->
+        val settings = BoeLoginSettings(context)
+        settings.save("synthetic-account", "synthetic-password", true)
+        settings.markStarted(settings.load().revision)
+        val reopened = BoeLoginSettings(context)
+        assertTrue(reopened.paused())
+        assertTrue(BoeLoginPolicy.canStart(reopened.paused(), false, false,
+            attendanceRequest = true, blocked = reopened.blocked()))
+        assertFalse(BoeLoginPolicy.canStart(reopened.paused(), false, false,
+            attendanceRequest = false, blocked = reopened.blocked()))
+        reopened.allowRetry()
+        val credentials = reopened.load()
+        reopened.markStarted(credentials.revision)
+        assertEquals("synthetic-account", credentials.username)
+        assertEquals("synthetic-password", credentials.password)
+        assertFalse(BoeLoginPolicy.canStart(reopened.paused(), false, true,
+            attendanceRequest = true, blocked = reopened.blocked()))
+        reopened.block(credentials.revision)
+        assertFalse(BoeLoginPolicy.canStart(reopened.paused(), false, false,
+            attendanceRequest = true, blocked = reopened.blocked()))
+    }
+
     private fun descendants(view: View): List<View> = listOf(view) +
         if (view is ViewGroup) (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) } else emptyList()
 

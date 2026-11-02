@@ -8,8 +8,9 @@ object BoeLoginPolicy {
     const val CONFIRM = "android:id/button1"
     const val HOME = "com.mobile.boe:id/tab_apps"
 
-    fun canStart(paused: Boolean, userInitiated: Boolean, alreadyStarted: Boolean): Boolean =
-        !alreadyStarted && (!paused || userInitiated)
+    fun canStart(paused: Boolean, userInitiated: Boolean, alreadyStarted: Boolean,
+                 attendanceRequest: Boolean = false, blocked: Boolean = false): Boolean =
+        !alreadyStarted && (userInitiated || (!blocked && (!paused || attendanceRequest)))
 
     fun kickedOut(texts: Set<String>): Boolean = texts.any {
         val normalized = it.replace("帐号", "账号").replace("登陆", "登录")

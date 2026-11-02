@@ -6,6 +6,15 @@ import org.junit.Test
 class BoeLoginPolicyTest {
     private val form = BoeLoginScreen(TestPolicy.targetPackage, form = true, submitEnabled = true)
 
+    @Test fun scheduledAttendanceRetriesTransientPauseButNeverExplicitRejection() {
+        assertTrue(BoeLoginPolicy.canStart(true, false, false, attendanceRequest = true))
+        assertFalse(BoeLoginPolicy.canStart(true, false, false, attendanceRequest = false))
+        assertFalse(BoeLoginPolicy.canStart(true, false, false, attendanceRequest = true, blocked = true))
+        assertFalse(BoeLoginPolicy.canStart(false, false, false, attendanceRequest = true, blocked = true))
+        assertTrue(BoeLoginPolicy.canStart(true, true, false, attendanceRequest = true, blocked = true))
+        assertFalse(BoeLoginPolicy.canStart(true, true, true, attendanceRequest = true))
+    }
+
     @Test fun explicitNewRequestMayRetryPausedLoginButBackgroundMayNot() {
         assertTrue(BoeLoginPolicy.canStart(paused = true, userInitiated = true, alreadyStarted = false))
         assertFalse(BoeLoginPolicy.canStart(paused = true, userInitiated = false, alreadyStarted = false))

@@ -158,6 +158,7 @@ class NavigationService : AccessibilityService() {
         if (running && loginAttempt != null &&
             event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
             BoeLoginPolicy.rejected(event.text.map { it.toString() }.toSet())) {
+            blockLoginRetry()
             stop("BOE 拒绝登录；已暂停自动重试，请检查帐号密码或手动处理后重新保存配置")
         } else if (!running && !handler.hasCallbacks(idleLogin)) {
             handler.postDelayed(idleLogin, 300)
@@ -299,14 +300,17 @@ class NavigationService : AccessibilityService() {
         }
         try {
             if (loginAttempt == null) {
-                if (!BoeLoginPolicy.canStart(settings.paused(), userInitiated, loginStarted)) {
+                if (!BoeLoginPolicy.canStart(settings.paused(), userInitiated, loginStarted,
+                        attendanceRequest = attendanceSlot != null && !attempt.dryRun,
+                        blocked = settings.blocked())) {
                     stop(if (loginStarted) "本轮已经重新登录过，BOE 再次要求登录；已停止，避免反复抢占其他设备会话"
                         else "BOE 自动登录已暂停；请检查帐号密码，主动点击测试或立即打卡可重新尝试一次")
                     return true
                 }
                 if (settings.paused()) {
                     settings.allowRetry()
-                    Store(this).log("用户主动发起新请求，允许本轮单次 BOE 填充和重新登录")
+                    Store(this).log(if (userInitiated) "用户主动发起新请求，允许本轮单次 BOE 填充和重新登录"
+                        else "新的定时打卡请求恢复上次临时中断的 BOE 登录；本轮只尝试一次")
                 }
                 settings.markStarted(requireNotNull(settings.revision()))
                 val credentials = settings.load()
@@ -327,10 +331,12 @@ class NavigationService : AccessibilityService() {
             val accepted = when (step) {
                 BoeLoginStep.WAIT -> return true
                 BoeLoginStep.HUMAN -> {
+                    settings.block(credentials.revision)
                     stop("BOE 登录需要验证码、人脸或安全解锁；已暂停自动重试，请手动处理后重新保存配置")
                     return true
                 }
                 BoeLoginStep.REJECTED -> {
+                    if (BoeLoginPolicy.rejected(texts)) settings.block(credentials.revision)
                     stop("BOE 未接受登录或协议确认；已暂停自动重试，请检查帐号密码或手动处理后重新保存配置")
                     return true
                 }
@@ -381,6 +387,15 @@ class NavigationService : AccessibilityService() {
             stop("无法保存 BOE 登录尝试状态，或配置已改变；已停止，请检查存储及配置")
         }
         return true
+    }
+
+    private fun blockLoginRetry() {
+        val revision = loginCredentials?.revision ?: return
+        try {
+            BoeLoginSettings(this).block(revision)
+        } catch (_: IllegalStateException) {
+            Notice.result(this, "无法保存 BOE 登录拒绝状态；请检查配置和设备存储，暂停自动计划后手动处理")
+        }
     }
 
     private fun loginAction(node: AccessibilityNodeInfo, action: Int, value: String? = null): Boolean {

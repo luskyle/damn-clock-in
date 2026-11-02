@@ -27,6 +27,7 @@ object BoeLoginSettingsDialog {
                 "打卡过程中登录成功后继续原请求，单独测试登录不会打卡。\n\n" +
                 "安卓重新登录可能将 iPhone 上的 BOE 挤下线。不会在后台反复抢登录。" +
                 "每轮只提交一次；未确认成功或遇到密码错误、验证码、人脸、安全锁时暂停。" +
+                "新的定时打卡可恢复临时中断，但不会自动重试明确密码错误或额外验证。" +
                 "请检查后主动点击测试或立即打卡重试，无需反复保存配置。\n\n" +
                 "帐号密码仅在本机通过 Android Keystore 加密保存，只填写到已识别的 BOE 登录控件，" +
                 "不进入日志、推送或备份。已保存的内容不会回显。更换时请同时填写帐号及密码；都留空则保留。"
@@ -51,7 +52,8 @@ object BoeLoginSettingsDialog {
         val status = TextView(activity).apply {
             text = when {
                 !settings.configured() -> "未配置，不自动登录"
-                settings.paused() -> "已保存；后台登录已暂停，主动测试或立即打卡可重试一次"
+                settings.blocked() -> "已保存；登录被拒绝或需人工验证，请检查后重新保存"
+                settings.paused() -> "已保存；上次登录中断，新打卡任务可尝试一次"
                 else -> "已保存，可自动重新登录"
             }
             layout.addView(this)

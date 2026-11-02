@@ -15,6 +15,7 @@ class BoeLoginSettings(context: Context) {
 
     fun configured(): Boolean = prefs.contains("credentials") && prefs.getBoolean("privacyConsent", false)
     fun paused(): Boolean = prefs.getBoolean("paused", false)
+    fun blocked(): Boolean = prefs.getBoolean("blocked", false)
     fun revision(): String? = prefs.getString("revision", null)
 
     fun save(username: String, password: String, privacyConsent: Boolean) {
@@ -23,7 +24,7 @@ class BoeLoginSettings(context: Context) {
         val encrypted = secret.encrypt(value)
         check(prefs.edit().putString("credentials", encrypted)
             .putString("revision", UUID.randomUUID().toString()).putBoolean("privacyConsent", true)
-            .putBoolean("paused", false).commit()) { "Cannot save BOE login configuration" }
+            .putBoolean("paused", false).putBoolean("blocked", false).commit()) { "Cannot save BOE login configuration" }
     }
 
     fun load(): BoeCredentials {
@@ -37,7 +38,7 @@ class BoeLoginSettings(context: Context) {
 
     fun allowRetry() {
         check(configured()) { "BOE login not configured" }
-        check(prefs.edit().putBoolean("paused", false)
+        check(prefs.edit().putBoolean("paused", false).putBoolean("blocked", false)
             .putString("revision", UUID.randomUUID().toString()).commit()) { "Cannot reset BOE login attempt" }
     }
 
@@ -48,7 +49,14 @@ class BoeLoginSettings(context: Context) {
 
     fun markSuccessful(revision: String) {
         check(configured() && revision() == revision) { "BOE login configuration changed" }
-        check(prefs.edit().putBoolean("paused", false).commit()) { "Cannot persist BOE login success" }
+        check(prefs.edit().putBoolean("paused", false).putBoolean("blocked", false).commit()) { "Cannot persist BOE login success" }
+    }
+
+    fun block(revision: String) {
+        check(configured() && revision() == revision) { "BOE login configuration changed" }
+        check(prefs.edit().putBoolean("paused", true).putBoolean("blocked", true).commit()) {
+            "Cannot persist BOE login rejection"
+        }
     }
 
     fun clear() {
