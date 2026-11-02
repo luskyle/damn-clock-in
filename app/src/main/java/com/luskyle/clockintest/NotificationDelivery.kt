@@ -8,11 +8,23 @@ import java.security.KeyStore
 
 object NotificationDelivery {
     fun result(context: Context, slot: ScheduleSlot, startedAt: Long, success: Boolean, submitted: Boolean, reason: String) {
+        deliverResult(context, slot.title, startedAt, success, submitted, reason)
+    }
+
+    fun testSuccess(context: Context) {
+        deliverResult(context, "模拟时段", System.currentTimeMillis(), true, false,
+            "用户主动测试打卡成功时的 Bark 通知，未执行考勤", testOnly = true)
+    }
+
+    private fun deliverResult(context: Context, slot: String, startedAt: Long, success: Boolean,
+                              submitted: Boolean, reason: String, testOnly: Boolean = false) {
         removeLegacyNotifications(context)
-        val subject = "永不迟到 · ${slot.title} · ${NotificationPolicy.outcome(success, submitted)}"
-        val body = NotificationPolicy.body(slot.title, Store.format(startedAt), Store.format(System.currentTimeMillis()),
-            success, submitted, reason)
+        val subject = if (testOnly) "永不迟到 · 模拟打卡成功（非真实考勤）"
+            else "永不迟到 · $slot · ${NotificationPolicy.outcome(success, submitted)}"
+        val body = NotificationPolicy.body(slot, Store.format(startedAt), Store.format(System.currentTimeMillis()),
+            success, submitted, reason, testOnly)
         if (BarkSettings(context).configured()) BarkDelivery.enqueue(context, subject, body)
+        else if (testOnly) Notice.result(context, "Bark 未发送：请先填写 iPhone 的 Bark Key")
     }
 
     fun schedule(context: Context): Boolean {

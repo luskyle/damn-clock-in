@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NotificationPolicyTest {
+    @Test fun simulatedSuccessNeverClaimsVerifiedRealAttendance() {
+        val body = NotificationPolicy.body("模拟时段", "start", "finish", true, false, "模拟测试", testOnly = true)
+        assertTrue(body.contains("模拟打卡成功（未执行真实考勤）"))
+        assertTrue(body.contains("未打开 BOE、未点击打卡"))
+        assertFalse(body.contains("结果：打卡成功（已核验）"))
+        assertFalse(body.contains("成功表示助手观察到本次成功反馈"))
+    }
+
     @Test fun clickWithoutEvidenceNeverBecomesSuccessfulNotification() {
         assertEquals("打卡未完成", NotificationPolicy.outcome(false, false))
         assertEquals("打卡结果待核验", NotificationPolicy.outcome(false, true))

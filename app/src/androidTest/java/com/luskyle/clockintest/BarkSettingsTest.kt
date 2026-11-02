@@ -26,6 +26,39 @@ class BarkSettingsTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val target = instrumentation.targetContext
 
+    @Test fun successAndSimulatedSuccessUseSameQueueWithoutChangingAttendance() {
+        check(InstrumentationRegistry.getArguments().getString("barkTestDevice") == "true")
+        val settings = BarkSettings(target)
+        val outbox = NotificationOutbox(target, DeliveryChannel.BARK)
+        check(!settings.configured() && outbox.first() == null)
+        NotificationDelivery.schedule(target)
+        val originalPlans = Store(target).prefs.all - "history"
+        val scheduler = target.getSystemService(JobScheduler::class.java)
+        try {
+            settings.saveKey("synthetic-success-test-key")
+            assertEquals(JobScheduler.RESULT_SUCCESS, scheduler.schedule(
+                JobInfo.Builder(31, ComponentName(target, BarkJobService::class.java))
+                    .setMinimumLatency(600_000).build()))
+            NotificationDelivery.result(target, ScheduleSlot.MORNING, System.currentTimeMillis(), true, true,
+                "测试夹具中的本次新增记录")
+            val real = requireNotNull(outbox.first())
+            assertEquals("永不迟到 · 上班 · 打卡成功（已核验）", real.getString("subject"))
+            assertTrue(real.getString("body").contains("结果：打卡成功（已核验）"))
+            outbox.acknowledge(real.getString("id"), "测试夹具已核验，不发送到网络")
+            NotificationDelivery.testSuccess(target)
+            val simulated = requireNotNull(outbox.first())
+            assertEquals("永不迟到 · 模拟打卡成功（非真实考勤）", simulated.getString("subject"))
+            assertTrue(simulated.getString("body").contains("未打开 BOE、未点击打卡"))
+            assertFalse(simulated.getString("body").contains("结果：打卡成功（已核验）"))
+            assertEquals(real.getString("endpoint"), simulated.getString("endpoint"))
+            assertFalse(simulated.toString().contains("synthetic-success-test-key"))
+            assertEquals(originalPlans, Store(target).prefs.all - "history")
+        } finally {
+            settings.clear()
+            outbox.clear()
+        }
+    }
+
     @Test fun upgradeRemovesClawCredentialsAndJobButPreservesBarkQueueAndPlans() {
         check(InstrumentationRegistry.getArguments().getString("barkTestDevice") == "true")
         val settings = BarkSettings(target)

@@ -339,46 +339,63 @@ class MainActivity : Activity() {
         val store = Store(this)
         val notification = getSystemService(NotificationManager::class.java).areNotificationsEnabled()
         val battery = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+        val boeConfigured = BoeLoginSettings(this).configured()
+        val barkConfigured = BarkSettings(this).configured()
+        val access = NavigationAccess.read(this)
+        val exact = Scheduler(this).exactAllowed()
         val layout = column().apply { setPadding(dp(24), dp(8), dp(24), dp(12)) }
-        fun entry(label: String, action: () -> Unit) {
-            layout.addView(button(label, action = action), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        fun entry(label: String, complete: Boolean? = null, action: () -> Unit) {
+            val backgroundColor = when (complete) {
+                true -> Color.rgb(232, 244, 241)
+                false -> Color.rgb(253, 235, 236)
+                null -> page
+            }
+            val textColor = when (complete) {
+                true -> teal
+                false -> Color.rgb(157, 47, 57)
+                null -> ink
+            }
+            layout.addView(button(label, action = action).apply {
+                background = round(backgroundColor, 14)
+                setTextColor(textColor)
+            }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
-        entry("BOE 帐号与自动登录 · ${if (BoeLoginSettings(this).configured()) "已配置" else "未配置"}") {
+        entry("BOE 帐号与自动登录 · ${if (boeConfigured) "已配置" else "未配置"}", boeConfigured) {
             settingsPanel?.dismiss()
             settingsPanel = null
             boeLoginPanel = BoeLoginSettingsDialog.show(this)
         }
-        entry("Bark 推送到 iPhone · ${if (BarkSettings(this).configured()) "已配置" else "未配置"}") {
+        entry("Bark 推送到 iPhone · ${if (barkConfigured) "已配置" else "未配置"}", barkConfigured) {
             settingsPanel?.dismiss()
             settingsPanel = null
             barkPanel = BarkSettingsDialog.show(this)
         }
-        entry("无障碍服务 · ${NavigationAccess.read(this).label}") {
+        entry("无障碍服务 · ${access.label}", access == NavigationAccess.CONNECTED) {
             AlertDialog.Builder(this).setTitle("${getString(R.string.app_name)} · 考勤辅助")
                 .setMessage(getString(R.string.service_description))
                 .setPositiveButton("前往设置") { _, _ -> settings(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                 .setNegativeButton("取消", null).show()
         }
-        entry("通知 · ${if (notification) "已允许" else "未允许"}") {
+        entry("通知 · ${if (notification) "已允许" else "未允许"}", notification) {
             if (Build.VERSION.SDK_INT >= 33 && !notification)
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
             else settings(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
         }
-        entry("精确闹钟 · ${if (Scheduler(this).exactAllowed()) "已允许" else "未允许"}") {
+        entry("精确闹钟 · ${if (exact) "已允许" else "未允许"}", exact) {
             if (Build.VERSION.SDK_INT >= 31)
                 settings(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
         }
-        entry("电池优化 · ${if (battery) "已豁免" else "去设置"}") {
+        entry("电池优化 · ${if (battery) "已豁免" else "未豁免"}", battery) {
             settings(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
-        entry("自启动与后台保护（重要）") {
+        entry("自启动与后台保护（重要） · 需手动检查", false) {
             AlertDialog.Builder(this).setTitle("避免清理任务时关闭无障碍")
                 .setMessage("一加 / OPPO：在应用详情 → 耗电管理，开启“允许完全后台行为”和“允许应用自启动”。这与普通电池优化豁免不是同一项；无需为此开启关联启动。\n\n其他品牌请检查本应用的自启动、后台运行和省电限制。允许后台运行可能增加耗电。\n\n正常返回桌面不应要求重新授权；若系统已关闭无障碍，仍需手动开启一次。不能阻止用户强行停止，也不能保证永久授权。")
                 .setPositiveButton("打开应用详情") { _, _ ->
                     settings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
                 }.setNegativeButton("取消", null).show()
         }
-        entry("先检查锁屏显示权限（不导航）") {
+        entry("先检查锁屏显示权限（不导航） · 需实测", false) {
             startActivity(Intent(this, WakeActivity::class.java).putExtra("preview", true))
         }
         entry("2 分钟后息屏测试（仅一次）") {
@@ -397,7 +414,9 @@ class MainActivity : Activity() {
             isChecked = store.prefs.getBoolean("stayAwake", false)
             setOnCheckedChangeListener { _, checked -> store.prefs.edit().putBoolean("stayAwake", checked).apply() }
         })
-        layout.addView(text("保持亮屏选项仅在本面板前台有效；定时任务另有短时唤醒机制。厂商自启动需手动配置；无法绕过安全锁屏、关机或系统强行停止。", 12f, muted))
+        layout.addView(text("绿色表示已配置或当前授权可用，淡红色表示未完成或待核验。配置完成不代表登录或推送已验证成功。" +
+            "厂商自启动及锁屏显示无法自动读取，需手动检查和实测，不会仅因打开过设置就标为完成。\n\n" +
+            "保持亮屏选项仅在本面板前台有效；定时任务另有短时唤醒机制。无法绕过安全锁屏、关机或系统强行停止。", 12f, muted))
         settingsPanel = AlertDialog.Builder(this).setTitle("运行设置")
             .setView(ScrollView(this).apply { addView(layout) }).setPositiveButton("完成") { _, _ -> render() }.show()
     }

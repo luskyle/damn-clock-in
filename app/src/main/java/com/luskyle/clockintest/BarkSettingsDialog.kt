@@ -78,6 +78,15 @@ object BarkSettingsDialog {
             }
         })
         layout.addView(Button(activity).apply {
+            text = "模拟打卡成功通知（不打卡）"
+            setOnClickListener {
+                if (save()) {
+                    NotificationDelivery.testSuccess(activity)
+                    status.text = BarkDelivery.status(activity)
+                }
+            }
+        })
+        layout.addView(Button(activity).apply {
             text = "刷新 Bark 发送状态 / 重试"
             setOnClickListener {
                 BarkDelivery.retry(activity)
