@@ -422,11 +422,6 @@ class MainActivity : Activity() {
     }
 
     private fun showHistory() {
-        val content = text(Store(this).history().ifEmpty { "暂无记录，试试立即测试吧。" }, 13f).apply {
-            setPadding(dp(24), dp(8), dp(24), dp(24))
-            setTextIsSelectable(true)
-        }
-        AlertDialog.Builder(this).setTitle("执行记录 · 仅本机")
-            .setView(ScrollView(this).apply { addView(content) }).setPositiveButton("关闭", null).show()
+        HistoryDialog.show(this)
     }
 }
