@@ -49,7 +49,7 @@ class Scheduler(private val context: Context) {
         ScheduleSlot.entries.forEach { disableSlot(it) }
         alarms.cancel(wakeTestPending())
         check(store.prefs.edit().remove("wakeTestAt").commit()) { "Cannot cancel wake test" }
-        if (NavigationService.instance != null) NavigationService.instance?.stop("已停止导航和每日计划")
+        if (NavigationService.instance != null) NavigationService.instance?.cancelCurrent("已停止导航和每日计划")
         else WakeSession.fail(context, "已停止导航和每日计划")
         WakeSession.finish()
         Notice.result(context, "上下班计划已关闭；不会再自动导航")
@@ -93,6 +93,8 @@ class Scheduler(private val context: Context) {
     }
 
     fun disableSlot(slot: ScheduleSlot) {
+        NavigationService.instance?.cancelAutomaticSlot(slot)
+        if (WakeSession.attendanceSlot == slot) WakeSession.fail(context, "对应计划关闭，取消本次任务")
         store.setEnabled(slot, false)
         alarms.cancel(pending(slot))
     }
@@ -201,7 +203,7 @@ class Scheduler(private val context: Context) {
             return
         }
         store.log("${slot.title}定时定位打卡计划开始")
-        WakeSession.request(context, TestPolicy.end(TestPolicy.day(now), window), slot)
+        WakeSession.request(context, AttendanceRetryPolicy.verificationEnd(planned), slot)
     }
 }
 

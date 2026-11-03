@@ -9,6 +9,12 @@ class DualScheduleTest {
     private val morning = TimeWindow.morning
     private val evening = TimeWindow(17 * 60 + 30, 18 * 60)
 
+    @Test fun morningDefaultIs0740To0745With301PossibleSeconds() {
+        assertEquals("07:40 – 07:45", morning.toString())
+        assertEquals(300, morning.seconds)
+        assertEquals(301, (0..morning.seconds).count())
+    }
+
     @Test fun allEveningCandidatesAreInsideConfiguredWindow() {
         for (second in 0..evening.seconds) {
             val chosen = TestPolicy.choose(day, second, evening)
@@ -29,10 +35,10 @@ class DualScheduleTest {
 
     @Test fun overlapIncludesSharedBoundaryButNotSeparateWindows() {
         assertFalse(morning.overlaps(evening))
-        assertTrue(morning.overlaps(TimeWindow(8 * 60, 9 * 60)))
-        assertTrue(morning.overlaps(TimeWindow(8 * 60 + 10, 9 * 60)))
+        assertTrue(morning.overlaps(TimeWindow(morning.startMinute, 9 * 60)))
+        assertTrue(morning.overlaps(TimeWindow(morning.endMinute, 9 * 60)))
         assertTrue(morning.overlaps(TimeWindow(7 * 60, 9 * 60)))
-        assertFalse(morning.overlaps(TimeWindow(8 * 60 + 11, 9 * 60)))
+        assertFalse(morning.overlaps(TimeWindow(morning.endMinute + 1, 9 * 60)))
     }
 
     @Test fun invalidWindowsAreRejected() {

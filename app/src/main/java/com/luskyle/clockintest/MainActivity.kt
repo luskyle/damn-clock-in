@@ -75,6 +75,11 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        NavigationService.instance?.prepareManualOperation()
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     private fun row() = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -176,31 +181,20 @@ class MainActivity : Activity() {
                 ))
                 space(14)
                 addView(button("设置${slot.title}时间段") { editWindow(slot) }, LinearLayout.LayoutParams(-1, -2))
-                store.lastAttendance(slot)?.let {
-                    space(10)
-                    addView(text("最近真实打卡尝试：$it", 12f, muted))
-                }
             }
         }
         content.space(2)
-        content.addView(button("立即测试 · 只到页面", true) {
+        content.addView(button("立即打卡 · 只到打卡页面", true) {
             val service = NavigationService.instance
+            service?.prepareManualOperation()
             val issue = NavigationAccess.read(this).issue
             if (issue != null) feedback(issue)
             else if (service == null) feedback("无障碍连接已变化，请重试")
             else service.begin(userInitiated = true)
         }, LinearLayout.LayoutParams(-1, dp(54)))
         content.space(10)
-        content.addView(button("立即打卡 · 需再次确认") { confirmAttendance(dryRun = false) },
+        content.addView(button("立即打卡 · 执行一次真实打卡") { confirmAttendance() },
             LinearLayout.LayoutParams(-1, -2))
-        content.space(10)
-        content.addView(button("打卡预检 · 不点击打卡") { confirmAttendance(dryRun = true) },
-            LinearLayout.LayoutParams(-1, -2))
-        content.space(10)
-        content.addView(button("停止测试并关闭全部计划") {
-            scheduler.disable()
-            render()
-        }, LinearLayout.LayoutParams(-1, -2))
         content.space(18)
         val ready = scheduler.requirements() == null
         content.card {
@@ -238,7 +232,7 @@ class MainActivity : Activity() {
             return
         }
         val store = Store(this)
-        val action = "定位打卡，每轮最多自动点击三次，等待核验后才重试，可返回重进一次；不再逐次询问。可能产生多条真实记录，核验成功后通过系统应用详情强行停止 BOE，再返回桌面并锁屏息屏；不清除登录数据。强行停止会停止 BOE 后台服务和消息，直到下次打开"
+        val action = "定位打卡，每轮最多点击三次，未核验成功时隔 30 秒重新走流程，成功即停止；从计划启动点起最多重试 30 分钟。可能产生重复记录，在助手中主动操作可手动接管，不改变后续计划。真实打卡任务及只到打卡页面、登录测试等本人主动操作可填写帐号密码，空闲不抢登录。核验成功后强行停止 BOE 并息屏，不清除登录数据"
         AlertDialog.Builder(this).setTitle("开启${slot.title}计划？")
             .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录，或在运行设置保存 BOE 帐号密码以自动重新登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
             .setPositiveButton("确认开启") { _, _ -> scheduler.enable(slot); render() }
@@ -246,24 +240,23 @@ class MainActivity : Activity() {
             .setOnCancelListener { render() }.show()
     }
 
-    private fun confirmAttendance(dryRun: Boolean) {
+    private fun confirmAttendance() {
         val mode = AttendanceMode.LOCATION
-        AlertDialog.Builder(this).setTitle(if (dryRun) "选择预检时段（不提交）" else "选择本次真实打卡时段")
+        AlertDialog.Builder(this).setTitle("选择本次真实打卡时段")
             .setItems(ScheduleSlot.entries.map { it.title }.toTypedArray()) { _, index ->
                 val slot = ScheduleSlot.entries[index]
                 AlertDialog.Builder(this).setTitle("${slot.title}${mode.label}")
-                    .setMessage(if (dryRun) "仅打开页面并检查唯一可点击按钮，不点击打卡。"
-                        else "将发起新一轮真实定位打卡，不限制当天手动发起次数；今天已成功或之前用完重试次数也可以再次打卡。\n\n每轮最多自动点击三次，每次先等十秒核验，可返回重进一次；本轮结束后可以再次手动发起，不改动定时计划。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后在系统应用详情强行停止 BOE，再返回桌面并锁屏息屏；BOE 后台服务及消息停止，直到下次打开，不清除登录数据。不批准额外考勤弹窗、不绕过验证。")
-                    .setPositiveButton(if (dryRun) "开始预检" else "确认真实打卡") { _, _ ->
+                    .setMessage("将发起新一轮真实定位打卡，不限制当天手动发起次数；今天已成功或之前用完重试次数也可以再次打卡。\n\n每轮最多自动点击三次，每次先等十秒核验，可返回重进一次；本轮结束后可以再次手动发起，不改动定时计划。\n\n重复请求可能生成多条真实记录，请确认本人实际出勤。核验成功后在系统应用详情强行停止 BOE，再返回桌面并锁屏息屏；BOE 后台服务及消息停止，直到下次打开，不清除登录数据。不批准额外考勤弹窗、不绕过验证。")
+                    .setPositiveButton("确认真实打卡") { _, _ ->
                         val issue = NavigationAccess.read(this).issue
                         val service = NavigationService.instance
+                        service?.prepareManualOperation()
                         if (issue != null || service == null) {
                             val reason = issue ?: "无障碍连接已变化，请重试"
                             feedback(reason)
-                            if (!dryRun) NotificationDelivery.result(this, slot, System.currentTimeMillis(), false, false, reason)
+                            NotificationDelivery.result(this, slot, System.currentTimeMillis(), false, false, reason)
                         }
-                        else service.begin(slot = slot, previewMode = if (dryRun) mode else null,
-                            userInitiated = true)
+                        else service.begin(slot = slot, userInitiated = true)
                     }.setNegativeButton("取消", null).show()
             }.setNegativeButton("取消", null).show()
     }

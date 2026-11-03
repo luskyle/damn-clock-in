@@ -13,7 +13,8 @@ class AttendanceAttempt(val mode: AttendanceMode, val dryRun: Boolean, initialCl
     init { require(initialClicks in 0..MAX_CLICKS) }
     var clicks = initialClicks
         private set
-    val clicked: Boolean get() = clicks > 0
+    private var everClicked = initialClicks > 0
+    val clicked: Boolean get() = everClicked
     var waitingForResult = false
         private set
     private var successVisibleBeforeClick = false
@@ -35,7 +36,14 @@ class AttendanceAttempt(val mode: AttendanceMode, val dryRun: Boolean, initialCl
             baselineCaptured = true
         }
         clicks++
+        everClicked = true
         waitingForResult = true
+    }
+
+    fun restartFlow() {
+        check(!dryRun && mode == AttendanceMode.LOCATION)
+        clicks = 0
+        waitingForResult = false
     }
 
     fun prepareRetry(): Boolean {

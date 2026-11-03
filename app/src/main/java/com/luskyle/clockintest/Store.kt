@@ -74,6 +74,12 @@ class Store(context: Context) {
     fun attendanceStartedAt(slot: ScheduleSlot): Long =
         prefs.getLong("${slot.name}.attendanceStartedAt", 0)
 
+    fun resetAttendanceBudget(slot: ScheduleSlot) {
+        check(prefs.edit().putInt("${slot.name}.attendanceClicks", 0).commit()) {
+            "Cannot reset attendance retry budget"
+        }
+    }
+
     fun reserveAttendanceClick(slot: ScheduleSlot): Boolean {
         if (attendanceStartedAt(slot) == 0L || prefs.getBoolean("${slot.name}.attendanceSucceeded", false) ||
             attendanceClicks(slot) >= AttendanceAttempt.MAX_CLICKS) return false

@@ -3,7 +3,7 @@ package com.luskyle.clockintest
 import java.util.Locale
 
 enum class ScheduleSlot(val title: String, val defaultStart: Int, val defaultEnd: Int, val alarmId: Int) {
-    MORNING("上班", 7 * 60 + 50, 8 * 60 + 10, 10),
+    MORNING("上班", 7 * 60 + 40, 7 * 60 + 45, 10),
     EVENING("下班", 17 * 60 + 30, 17 * 60 + 32, 11)
 }
 

@@ -8,7 +8,7 @@ class TestPolicyTest {
     private val day = LocalDate.of(2026, 10, 30)
 
     @Test fun everyPossibleRandomTimeIsInsideWindow() {
-        for (second in 0..1200) {
+        for (second in 0..TimeWindow.morning.seconds) {
             val chosen = TestPolicy.choose(day, second)
             assertTrue(TestPolicy.inWindow(chosen))
             assertEquals(day, TestPolicy.day(chosen))
@@ -51,27 +51,27 @@ class TestPolicyTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun invalidRandomOffsetIsRejected() {
-        TestPolicy.choose(day, 1201)
+        TestPolicy.choose(day, TimeWindow.morning.seconds + 1)
     }
 
     @Test fun rebootDoesNotResampleExistingPlan() {
-        val plan = TestPolicy.choose(day, 400)
-        assertEquals(plan, TestPolicy.restoredPlan(TestPolicy.start(day) - 1000, plan, "", 900))
+        val plan = TestPolicy.choose(day, 100)
+        assertEquals(plan, TestPolicy.restoredPlan(TestPolicy.start(day) - 1000, plan, "", 250))
         assertEquals(plan, TestPolicy.restoredPlan(TestPolicy.start(day) + 1000, plan, "", 0))
     }
 
     @Test fun missedAlarmOnlyResumesInsideWindow() {
-        val plan = TestPolicy.choose(day, 400)
-        val now = TestPolicy.choose(day, 500)
-        assertEquals(now + 1000, TestPolicy.restoredPlan(now, plan, "", 900))
+        val plan = TestPolicy.choose(day, 100)
+        val now = TestPolicy.choose(day, 200)
+        assertEquals(now + 1000, TestPolicy.restoredPlan(now, plan, "", 250))
         assertEquals(
-            TestPolicy.choose(day.plusDays(1), 900),
-            TestPolicy.restoredPlan(TestPolicy.end(day) + 1, plan, "", 900)
+            TestPolicy.choose(day.plusDays(1), 250),
+            TestPolicy.restoredPlan(TestPolicy.end(day) + 1, plan, "", 250)
         )
     }
 
     @Test fun repeatedOrLateAttemptIsBlocked() {
-        val plan = TestPolicy.choose(day, 400)
+        val plan = TestPolicy.choose(day, 100)
         assertTrue(TestPolicy.canAttempt(plan, plan, ""))
         assertFalse(TestPolicy.canAttempt(plan - 1, plan, ""))
         assertFalse(TestPolicy.canAttempt(plan, plan, day.toString()))
@@ -80,8 +80,8 @@ class TestPolicyTest {
         assertFalse(TestPolicy.canAttempt(plan, 0, ""))
         assertFalse(TestPolicy.canAttempt(plan, TestPolicy.start(day) - 1, ""))
         assertEquals(
-            TestPolicy.choose(day.plusDays(1), 900),
-            TestPolicy.restoredPlan(plan + 1000, plan, day.toString(), 900)
+            TestPolicy.choose(day.plusDays(1), 250),
+            TestPolicy.restoredPlan(plan + 1000, plan, day.toString(), 250)
         )
     }
 
@@ -89,13 +89,13 @@ class TestPolicyTest {
         assertEquals("Asia/Shanghai", TestPolicy.zone.id)
         val lastDay = LocalDate.of(2026, 12, 31)
         assertEquals(LocalDate.of(2027, 1, 1), TestPolicy.firstDay(TestPolicy.end(lastDay)))
-        assertEquals("2026-10-29T23:50:00Z", java.time.Instant.ofEpochMilli(TestPolicy.start(day)).toString())
+        assertEquals("2026-10-29T23:40:00Z", java.time.Instant.ofEpochMilli(TestPolicy.start(day)).toString())
     }
 
     @Test fun clockRollbackDoesNotScheduleAnotherAttemptToday() {
         assertEquals(
-            TestPolicy.choose(day.plusDays(1), 900),
-            TestPolicy.restoredPlan(TestPolicy.start(day) - 1000, 0, day.toString(), 900)
+            TestPolicy.choose(day.plusDays(1), 250),
+            TestPolicy.restoredPlan(TestPolicy.start(day) - 1000, 0, day.toString(), 250)
         )
     }
 }

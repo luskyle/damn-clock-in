@@ -65,7 +65,7 @@ class WakeActivity : Activity() {
         handler.postDelayed(timeout, 8000)
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (keyguard.isKeyguardLocked && keyguard.isDeviceSecure) {
-            fail("屏幕已唤醒，但存在安全锁屏；请手动解锁后点击立即测试，不会绕过密码或人脸")
+            fail("屏幕已唤醒，但存在安全锁屏；请手动解锁后点击“立即打卡 · 只到打卡页面”，不会绕过密码或人脸")
         } else if (keyguard.isKeyguardLocked) {
             keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
                 override fun onDismissSucceeded() { navigate() }
@@ -94,7 +94,7 @@ class WakeActivity : Activity() {
         }
         Store(this).log("屏幕唤醒成功；开始导航，无需助手首页在前台")
         val slot = WakeSession.attendanceSlot
-        service.begin(until, slot = slot)
+        service.begin(until, slot = slot, userInitiated = slot == null)
         finish()
     }
 

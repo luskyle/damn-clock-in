@@ -19,7 +19,7 @@ object WakeSession {
         private set
 
     fun request(context: Context, deadline: Long, slot: ScheduleSlot? = null) {
-        if (active()) {
+        if (active() || NavigationService.instance?.hasActiveRequest == true) {
             Store(context).log("已有唤醒或导航请求，忽略重复触发")
             slot?.let {
                 NotificationDelivery.result(context, it, System.currentTimeMillis(), false, false,
@@ -44,7 +44,8 @@ object WakeSession {
             }
         timeout = Runnable {
             if (generation == token) {
-                NavigationService.instance?.stop("后台唤醒或导航超时，已停止；请检查自启动、后台运行和无障碍权限")
+                NavigationService.instance?.stop("后台唤醒或导航超时，已停止；请检查自启动、后台运行和无障碍权限",
+                    terminal = true)
                     ?: fail(context, "后台唤醒超时：无障碍服务未连接，请检查系统设置")
                 finish()
             }

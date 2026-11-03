@@ -57,6 +57,14 @@ class ScheduleStorageTest {
         assertFalse(store.prefs.contains("enabled"))
     }
 
+    @Test fun newMorningDefaultPreservesExplicitlySavedCustomWindows() {
+        val store = Store(context)
+        assertEquals(TimeWindow(460, 465), store.window(ScheduleSlot.MORNING))
+        assertFalse(store.enabled(ScheduleSlot.MORNING))
+        store.saveWindow(ScheduleSlot.MORNING, TimeWindow(470, 472))
+        assertEquals(TimeWindow(470, 472), Store(context).window(ScheduleSlot.MORNING))
+    }
+
     @Test fun attendanceClaimAndBudgetSurviveReopening() {
         val store = Store(context)
         assertFalse(store.prefs.contains("attendanceMode"))

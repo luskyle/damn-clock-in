@@ -21,8 +21,7 @@ object NotificationDelivery {
         removeLegacyNotifications(context)
         val subject = if (testOnly) "永不迟到 · 模拟打卡成功（非真实考勤）"
             else "永不迟到 · $slot · ${NotificationPolicy.outcome(success, submitted)}"
-        val body = NotificationPolicy.body(slot, Store.format(startedAt), Store.format(System.currentTimeMillis()),
-            success, submitted, reason, testOnly)
+        val body = NotificationPolicy.body(Store.format(startedAt), success, submitted, reason, testOnly)
         if (BarkSettings(context).configured()) BarkDelivery.enqueue(context, subject, body)
         else if (testOnly) Notice.result(context, "Bark 未发送：请先填写 iPhone 的 Bark Key")
     }
