@@ -43,7 +43,7 @@ jobs:
         run: bash scripts/package-release.sh
       - uses: actions/upload-artifact@v7
         with:
-          name: android-delivery
+          name: damn-clock-in
           path: dist/*
           if-no-files-found: error
       - name: Upload verification reports
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: android-delivery
+          name: damn-clock-in
           path: dist
       - name: Publish GitHub release
         env:

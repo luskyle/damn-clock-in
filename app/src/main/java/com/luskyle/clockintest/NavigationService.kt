@@ -232,23 +232,7 @@ class NavigationService : AccessibilityService() {
             when {
                 attempt.waitingForResult &&
                     SystemClock.elapsedRealtime() - submittedAt >= AttendanceAttempt.RESULT_WAIT_MS -> {
-                    if (automatic) {
-                        stop("点击后仍未核验成功，退出并强行停止 BOE 后重试")
-                    } else if (!attempt.prepareRetry()) {
-                        stop("本轮三次定位点击已用完，结果仍待核验")
-                    } else if (attempt.clicks >= 2 && !reentered) {
-                        reentered = true
-                        waitingForReentry = true
-                        clickedEntry = false
-                        clickedWorkbench = false
-                        returnedHome = true
-                        activity = ""
-                        if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
-                            stop("返回考勤入口失败，已停止重试")
-                        } else Store(this).log("暂无本次记录，返回后重新进入考勤页；本轮最多自动点击三次")
-                    } else {
-                        Store(this).log("暂无本次记录，准备有界重试；已点击 ${attempt.clicks}/3")
-                    }
+                    retryAfterResultWait()
                     return
                 }
             }
@@ -532,6 +516,24 @@ class NavigationService : AccessibilityService() {
     fun prepareManualOperation() {
         if (running && automatic) cancelCurrent("用户接管，已停止本次自动重试；保留定时计划和待核验结果")
         else if (WakeSession.active()) WakeSession.fail(this, "用户接管，取消本次唤醒任务，保留计划")
+    }
+
+    private fun retryAfterResultWait() {
+        if (!attempt.prepareRetry()) {
+            stop("本轮三次定位点击已用完，结果仍待核验")
+        } else if (attempt.clicks >= 2 && !reentered) {
+            reentered = true
+            waitingForReentry = true
+            clickedEntry = false
+            clickedWorkbench = false
+            returnedHome = true
+            activity = ""
+            if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
+                stop("返回考勤入口失败，已停止重试")
+            } else Store(this).log("暂无本次记录，返回后重新进入考勤页；本轮最多自动点击三次")
+        } else {
+            Store(this).log("暂无本次记录，准备有界重试；已点击 ${attempt.clicks}/3")
+        }
     }
 
     private fun retryEnvironmentReady(): Boolean {

@@ -123,6 +123,22 @@ class AttendanceRetryServiceTest {
         assertFalse(WakeSession.active())
     }
 
+    @Test fun automaticAttendanceExhaustsThreeClicksBeforeQueuingForceStop() = fixture { service ->
+        val attempt = AttendanceAttempt(AttendanceMode.LOCATION, false)
+        field(service, "attempt").set(service, attempt)
+        field(service, "reentered").setBoolean(service, true)
+        val retry = NavigationService::class.java.getDeclaredMethod("retryAfterResultWait")
+            .apply { isAccessible = true }
+        repeat(3) { index ->
+            attempt.markClick(emptySet())
+            retry.invoke(service)
+            assertEquals(index == 2, queued(service))
+            assertEquals(index == 2, field(service, "retryWaiting").getBoolean(service))
+            assertTrue(field(service, "running").getBoolean(service))
+            assertEquals(index + 1, attempt.clicks)
+        }
+    }
+
     @Test fun unverifiedForceStopEndsRetryWithoutReopeningOrReportingSuccess() = fixture { service ->
         service.stop("模拟更新弹窗阻塞")
         NavigationService::class.java.getDeclaredMethod("onRetryBoeStopped", String::class.java)
