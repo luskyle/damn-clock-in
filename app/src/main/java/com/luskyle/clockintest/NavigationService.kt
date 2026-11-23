@@ -6,6 +6,7 @@ import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Bundle
@@ -50,8 +51,13 @@ class NavigationService : AccessibilityService() {
     private var retryWaiting = false
     private var flowNumber = 1
     private var executionLock: PowerManager.WakeLock? = null
+    private var boeStopTask: Runnable? = null
     private val retryFlow = Runnable {
-        if (running && automatic && retryWaiting) restartAutomaticFlow()
+        if (running && automatic && retryWaiting) {
+            if (!retryEnvironmentReady()) return@Runnable
+            Store(this).log("本轮未核验成功，先通过系统强行停止 BOE，再重新打开打卡流程")
+            forceStopBoe(::onRetryBoeStopped)
+        }
     }
     private val tick = object : Runnable {
         override fun run() {
@@ -226,7 +232,9 @@ class NavigationService : AccessibilityService() {
             when {
                 attempt.waitingForResult &&
                     SystemClock.elapsedRealtime() - submittedAt >= AttendanceAttempt.RESULT_WAIT_MS -> {
-                    if (!attempt.prepareRetry()) {
+                    if (automatic) {
+                        stop("点击后仍未核验成功，退出并强行停止 BOE 后重试")
+                    } else if (!attempt.prepareRetry()) {
                         stop("本轮三次定位点击已用完，结果仍待核验")
                     } else if (attempt.clicks >= 2 && !reentered) {
                         reentered = true
@@ -526,15 +534,25 @@ class NavigationService : AccessibilityService() {
         else if (WakeSession.active()) WakeSession.fail(this, "用户接管，取消本次唤醒任务，保留计划")
     }
 
-    private fun restartAutomaticFlow() {
-        retryWaiting = false
-        if (!automatic || !running) return
+    private fun retryEnvironmentReady(): Boolean {
         if (System.currentTimeMillis() >= retryDeadline ||
             SystemClock.elapsedRealtime() >= retryElapsedDeadline ||
             getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
             stop("自动重试截止或设备锁定；请手动核验", terminal = true)
-            return
+            return false
         }
+        return true
+    }
+
+    private fun onRetryBoeStopped(error: String?) {
+        if (!running || !automatic || !retryWaiting) return
+        if (error != null) stop(error, terminal = true)
+        else restartAutomaticFlow()
+    }
+
+    private fun restartAutomaticFlow() {
+        if (!automatic || !running || !retryEnvironmentReady()) return
+        retryWaiting = false
         flowNumber++
         attempt.restartFlow()
         try {
@@ -560,7 +578,7 @@ class NavigationService : AccessibilityService() {
             return
         }
         Notice.show(this, "自动打卡第 $flowNumber 轮；在助手中主动操作可手动接管", true)
-        Store(this).log("重新进入 BOE 打卡流程，第 $flowNumber 轮；保留原请求核验起点")
+        Store(this).log("已强行停止后重新进入 BOE 打卡流程，第 $flowNumber 轮；保留原请求核验起点")
         try {
             startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: ActivityNotFoundException) {
@@ -571,6 +589,7 @@ class NavigationService : AccessibilityService() {
     }
 
     fun stop(message: String, success: Boolean = false, terminal: Boolean = false) {
+        if (running && retryWaiting && !terminal && !success) return
         if (running && AttendanceRetryPolicy.mayRetry(automatic, terminal, success, false,
                 System.currentTimeMillis(), retryDeadline) &&
             SystemClock.elapsedRealtime() + AttendanceRetryPolicy.RETRY_DELAY_MS < retryElapsedDeadline) {
@@ -579,8 +598,8 @@ class NavigationService : AccessibilityService() {
             loginAttempt = null
             handler.removeCallbacks(retryFlow)
             handler.postDelayed(retryFlow, AttendanceRetryPolicy.RETRY_DELAY_MS)
-            Store(this).log("自动打卡第 $flowNumber 轮未核验成功：$message；30 秒后重新走流程，可停止并手动接管")
-            Notice.show(this, "打卡尚未核验成功，30 秒后重试；在助手中主动操作可手动接管", true)
+            Store(this).log("自动打卡第 $flowNumber 轮未核验成功：$message；30 秒后强行停止 BOE 并重新走流程，可手动接管")
+            Notice.show(this, "未核验成功，30 秒后强行停止移动门户并重试", true)
             return
         }
         val submitted = attempt.clicked && running
@@ -596,6 +615,8 @@ class NavigationService : AccessibilityService() {
         automatic = false
         retryWaiting = false
         handler.removeCallbacks(retryFlow)
+        boeStopTask?.let(handler::removeCallbacks)
+        boeStopTask = null
         executionLock?.let { if (it.isHeld) it.release() }
         executionLock = null
         loginOnly = false
@@ -612,22 +633,31 @@ class NavigationService : AccessibilityService() {
     internal fun exitBoeAndLockScreen(result: String) {
         if (finishingSuccess) return
         finishingSuccess = true
+        forceStopBoe { error ->
+            if (error != null) Notice.result(this, "$result；$error")
+            returnHomeAndLockScreen(result)
+        }
+    }
+
+    private fun forceStopBoe(completed: (String?) -> Unit) {
+        fun finishStop(error: String?) {
+            boeStopTask?.let(handler::removeCallbacks)
+            boeStopTask = null
+            completed(error)
+        }
         val settingsIntent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             Uri.parse("package:${TestPolicy.targetPackage}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (settingsIntent.resolveActivity(packageManager)?.packageName != BoeStopPolicy.SETTINGS) {
-            Notice.result(this, "$result；本机应用详情不受支持，无法强行停止 BOE，请手动处理")
-            returnHomeAndLockScreen(result)
+            finishStop("本机应用详情不受支持，无法强行停止 BOE，请手动处理")
             return
         }
         try {
             startActivity(settingsIntent)
         } catch (_: ActivityNotFoundException) {
-            Notice.result(this, "$result；无法打开 BOE 应用详情，未强行停止")
-            returnHomeAndLockScreen(result)
+            finishStop("无法打开 BOE 应用详情，未强行停止")
             return
         } catch (_: SecurityException) {
-            Notice.result(this, "$result；系统禁止打开 BOE 应用详情，未强行停止")
-            returnHomeAndLockScreen(result)
+            finishStop("系统禁止打开 BOE 应用详情，未强行停止")
             return
         }
         val stopDeadline = SystemClock.elapsedRealtime() + 10_000
@@ -635,18 +665,26 @@ class NavigationService : AccessibilityService() {
         var confirmed = false
         val stopBoe = object : Runnable {
             override fun run() {
-                if (!finishingSuccess) return
-                @Suppress("DEPRECATION")
-                val stopped = packageManager.getApplicationInfo(TestPolicy.targetPackage, 0).flags and
-                    ApplicationInfo.FLAG_STOPPED != 0
+                if (boeStopTask !== this) return
+                if (running && automatic && !retryEnvironmentReady()) return
+                val stopped = try {
+                    @Suppress("DEPRECATION")
+                    val flags = packageManager.getApplicationInfo(TestPolicy.targetPackage, 0).flags
+                    flags and ApplicationInfo.FLAG_STOPPED != 0
+                } catch (_: PackageManager.NameNotFoundException) {
+                    finishStop("BOE 未安装，无法强行停止")
+                    return
+                } catch (_: SecurityException) {
+                    finishStop("系统禁止核验 BOE 强行停止状态")
+                    return
+                }
                 if (stopped) {
                     Store(this@NavigationService).log("已确认系统强行停止 BOE，应用处于 stopped 状态")
-                    returnHomeAndLockScreen(result)
+                    finishStop(null)
                     return
                 }
                 if (SystemClock.elapsedRealtime() >= stopDeadline) {
-                    Notice.result(this@NavigationService, "$result；未确认 BOE 已强行停止，请手动检查；仍尝试息屏")
-                    returnHomeAndLockScreen(result)
+                    finishStop("未确认 BOE 已强行停止，请手动检查")
                     return
                 }
                 val root = rootInActiveWindow
@@ -673,8 +711,7 @@ class NavigationService : AccessibilityService() {
                             false
                         }
                         if (!accepted) {
-                            Notice.result(this@NavigationService, "$result；系统拒绝强行停止 BOE 操作，请手动检查")
-                            returnHomeAndLockScreen(result)
+                            finishStop("系统拒绝强行停止 BOE 操作，请手动检查")
                             return
                         }
                         if (!requested) requested = true else confirmed = true
@@ -683,6 +720,7 @@ class NavigationService : AccessibilityService() {
                 handler.postDelayed(this, 300)
             }
         }
+        boeStopTask = stopBoe
         handler.postDelayed(stopBoe, 500)
     }
 
@@ -746,6 +784,9 @@ class NavigationService : AccessibilityService() {
 
     override fun onDestroy() {
         if (running) stop("导航服务已关闭，测试已停止", terminal = true)
+        boeStopTask?.let(handler::removeCallbacks)
+        boeStopTask = null
+        finishingSuccess = false
         instance = null
         super.onDestroy()
     }

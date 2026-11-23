@@ -3,6 +3,7 @@ package com.luskyle.clockintest
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.app.AlertDialog
 import android.os.Handler
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
@@ -49,6 +50,42 @@ class AttendanceRetryServiceTest {
         (field(service, "handler").get(service) as Handler)
             .hasCallbacks(field(service, "retryFlow").get(service) as Runnable)
 
+    @Test fun tappingAppTitleShowsInstalledVersionWithoutChangingPlans() {
+        check(InstrumentationRegistry.getArguments().getString("barkTestDevice") == "true")
+        check(!WakeSession.active() && NavigationService.instance == null)
+        NotificationDelivery.schedule(context)
+        val original = Store(context).prefs.all
+        val activity = instrumentation.startActivitySync(
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            instrumentation.runOnMainSync {
+                fun nodes(view: View): List<View> = listOf(view) +
+                    if (view is ViewGroup) (0 until view.childCount).flatMap {
+                        nodes(view.getChildAt(it))
+                    } else emptyList()
+                val title = nodes(activity.window.decorView).filterIsInstance<TextView>()
+                    .single { it.text.toString() == "永不迟到" }
+                assertTrue(title.performClick())
+                val dialog = MainActivity::class.java.getDeclaredField("versionPanel")
+                    .apply { isAccessible = true }.get(activity) as AlertDialog
+                @Suppress("DEPRECATION")
+                val installed = context.packageManager.getPackageInfo(context.packageName, 0)
+                val message = dialog.findViewById<TextView>(android.R.id.message)
+                assertEquals("版本：${installed.versionName}\n版本代码：${installed.longVersionCode}",
+                    message.text.toString())
+                assertTrue(dialog.isShowing)
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertEquals(original, Store(context).prefs.all)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val dialog = MainActivity::class.java.getDeclaredField("versionPanel")
+                    .apply { isAccessible = true }.get(activity) as AlertDialog
+                assertFalse(dialog.isShowing)
+            }
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
     @Test fun homepageHasOnlyOpenAndRealAttendanceManualActions() {
         check(InstrumentationRegistry.getArguments().getString("barkTestDevice") == "true")
         check(!WakeSession.active() && NavigationService.instance == null)
@@ -84,6 +121,32 @@ class AttendanceRetryServiceTest {
         assertFalse(field(service, "running").getBoolean(service))
         assertFalse(queued(service))
         assertFalse(WakeSession.active())
+    }
+
+    @Test fun unverifiedForceStopEndsRetryWithoutReopeningOrReportingSuccess() = fixture { service ->
+        service.stop("模拟更新弹窗阻塞")
+        NavigationService::class.java.getDeclaredMethod("onRetryBoeStopped", String::class.java)
+            .apply { isAccessible = true }.invoke(service, "未确认 BOE 已强行停止，请手动检查")
+        assertFalse(field(service, "running").getBoolean(service))
+        assertEquals(1, field(service, "flowNumber").getInt(service))
+        assertFalse(queued(service))
+        assertTrue(Store(context).history().contains("未确认 BOE 已强行停止，请手动检查"))
+    }
+
+    @Test fun manualTakeoverCancelsForceStopPollingAndLateCompletionCannotRestart() = fixture { service ->
+        service.stop("模拟弹窗阻塞")
+        val handler = field(service, "handler").get(service) as Handler
+        val poll = Runnable { fail("已取消的强行停止回调不应执行") }
+        field(service, "boeStopTask").set(service, poll)
+        handler.postDelayed(poll, 30_000)
+        service.prepareManualOperation()
+        assertFalse(handler.hasCallbacks(poll))
+        assertNull(field(service, "boeStopTask").get(service))
+        NavigationService::class.java.getDeclaredMethod("onRetryBoeStopped", String::class.java)
+            .apply { isAccessible = true }.invoke(service, *arrayOf<String?>(null))
+        assertFalse(field(service, "running").getBoolean(service))
+        assertEquals(1, field(service, "flowNumber").getInt(service))
+        assertFalse(queued(service))
     }
 
     @Test fun explicitStopAndPermissionFailureDoNotQueueAnotherRound() = fixture { service ->

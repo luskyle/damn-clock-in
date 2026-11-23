@@ -41,6 +41,7 @@ class MainActivity : Activity() {
     private var settingsPanel: AlertDialog? = null
     private var barkPanel: AlertDialog? = null
     private var boeLoginPanel: AlertDialog? = null
+    private var versionPanel: AlertDialog? = null
     private val updateUi = Runnable { render() }
     private val changes = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         handler.removeCallbacks(updateUi)
@@ -72,6 +73,8 @@ class MainActivity : Activity() {
         barkPanel = null
         boeLoginPanel?.dismiss()
         boeLoginPanel = null
+        versionPanel?.dismiss()
+        versionPanel = null
         super.onPause()
     }
 
@@ -141,7 +144,10 @@ class MainActivity : Activity() {
         val store = Store(this)
         val scheduler = Scheduler(this)
         val content = column().apply { setPadding(dp(20), dp(24), dp(20), dp(24)) }
-        content.addView(text(getString(R.string.app_name), 30f, bold = true))
+        content.addView(text(getString(R.string.app_name), 30f, bold = true).apply {
+            contentDescription = "${getString(R.string.app_name)}，查看版本信息"
+            setOnClickListener { showVersion() }
+        })
         content.space(4)
         content.addView(text(getString(R.string.app_tagline), 15f, muted))
         content.space(20)
@@ -223,6 +229,17 @@ class MainActivity : Activity() {
         scroll?.post { scroll?.scrollTo(0, oldY) }
     }
 
+    private fun showVersion() {
+        @Suppress("DEPRECATION")
+        val info = packageManager.getPackageInfo(packageName, 0)
+        versionPanel?.dismiss()
+        versionPanel = AlertDialog.Builder(this)
+            .setTitle("${getString(R.string.app_name)} · 版本信息")
+            .setMessage("版本：${info.versionName}\n版本代码：${info.longVersionCode}")
+            .setPositiveButton("关闭", null)
+            .show()
+    }
+
     private fun confirmEnable(slot: ScheduleSlot) {
         val scheduler = Scheduler(this)
         val issue = scheduler.requirements()
@@ -232,7 +249,7 @@ class MainActivity : Activity() {
             return
         }
         val store = Store(this)
-        val action = "定位打卡，每轮最多点击三次，未核验成功时隔 30 秒重新走流程，成功即停止；从计划启动点起最多重试 30 分钟。可能产生重复记录，在助手中主动操作可手动接管，不改变后续计划。真实打卡任务及只到打卡页面、登录测试等本人主动操作可填写帐号密码，空闲不抢登录。核验成功后强行停止 BOE 并息屏，不清除登录数据"
+        val action = "定位打卡，点击后十秒仍无成功证据或导航临时失败时，隔 30 秒强行停止 BOE，确认停止后重新打开完整打卡流程，成功即停止；从计划启动点起最多重试 30 分钟。可能产生重复记录，在助手中主动操作可手动接管，不改变后续计划。真实打卡任务及只到打卡页面、登录测试等本人主动操作可填写帐号密码，空闲不抢登录。强行停止失败或额外验证需本人处理。核验成功后强行停止 BOE 并息屏，不清除登录数据"
         AlertDialog.Builder(this).setTitle("开启${slot.title}计划？")
             .setMessage("中国大陆工作日北京时间 ${store.window(slot)} 随机一次，$action。跳过节假日和普通周末，调休补班执行。\n\n到时自动亮屏，无需助手首页在前台；安全锁屏需手动解锁。需允许后台运行、联网且 BOE 已登录，或在运行设置保存 BOE 帐号密码以自动重新登录。仅使用真实定位；遇到额外认证或不明页面停止。系统强行停止或关机无法保证执行。")
             .setPositiveButton("确认开启") { _, _ -> scheduler.enable(slot); render() }

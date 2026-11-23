@@ -10,8 +10,8 @@ android {
         applicationId = "com.luskyle.clockintest"
         minSdk = 29
         targetSdk = 34
-        versionCode = 26
-        versionName = "0.9.4"
+        versionCode = 28
+        versionName = "0.9.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
